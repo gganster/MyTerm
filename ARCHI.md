@@ -23,7 +23,7 @@ Trois principes gouvernent toutes les décisions ci-dessous.
 | Build | electron-vite (main / preload / renderer) |
 | Packaging | electron-builder → NSIS x64 + electron-updater |
 | UI | React 19 + TypeScript strict + Tailwind CSS v4 + shadcn/ui |
-| Terminal (rendu) | `@xterm/xterm` + addons fit / webgl / canvas |
+| Terminal (rendu) | `@xterm/xterm` + addons fit / webgl (repli renderer DOM) |
 | Terminal (process) | `node-pty` (ConPTY sous Windows) |
 | État renderer | Zustand |
 | Validation | Zod (schéma `.myterm.json`) |
@@ -106,9 +106,9 @@ uiSlice          focusedPaneId, zoomedPaneId, theme, editorOpen
 |---|---|---|
 | `@xterm/addon-fit` | recalcule cols/rows selon la taille du conteneur | appelé sur resize et sur zoom, débouncé, puis propagé au PTY |
 | `@xterm/addon-webgl` | rendu GPU | ~10× plus rapide que le DOM sur les sorties verbeuses |
-| `@xterm/addon-canvas` | fallback | voir ci-dessous |
+| *(renderer DOM intégré)* | fallback | voir ci-dessous — l'addon canvas ne supporte pas xterm 6 |
 
-**Point de vigilance WebGL** : chaque terminal WebGL consomme un contexte WebGL, et Chromium en plafonne le nombre (~16) avant de recycler les plus anciens. Six panes passent confortablement, une grille 4×4 non. Stratégie retenue : charger l'addon WebGL par défaut, écouter son événement de perte de contexte, et basculer ce terminal sur l'addon canvas en cas d'échec. Coût : ~20 lignes, et cela couvre définitivement le cas des grandes grilles.
+**Point de vigilance WebGL** : chaque terminal WebGL consomme un contexte WebGL, et Chromium en plafonne le nombre (~16) avant de recycler les plus anciens. Six panes passent confortablement, une grille 4×4 non. Stratégie retenue : charger l'addon WebGL par défaut, écouter son événement de perte de contexte, et **décharger l'addon** en cas d'échec — xterm retombe alors sur son renderer DOM intégré, sans dépendance supplémentaire. (`@xterm/addon-canvas@0.7` déclare un peer `@xterm/xterm@^5` et ne supporte pas xterm 6 ; seules des préversions le font.) Coût : ~20 lignes, et cela couvre définitivement le cas des grandes grilles.
 
 `@xterm/addon-search` n'est pas installé au MVP — la recherche dans le scrollback est explicitement post-MVP dans le PRD.
 
@@ -268,8 +268,10 @@ export default defineConfig({
 
 Corollaires à ne pas rater :
 - `node-pty` va dans `dependencies`, **pas** `devDependencies` — sinon electron-builder ne l'embarque pas.
-- Le binaire natif doit être compilé contre l'ABI d'Electron, pas celle de Node : `electron-rebuild` en `postinstall`, ce qui impose **Visual Studio Build Tools + Python** sur la machine de build. C'est le vrai coût de ce choix (voir ADR-002).
+- Le binaire natif est un prebuild N-API valable pour Node comme pour Electron : **aucune étape de rebuild, aucune toolchain C++ requise** (ADR-002, révisé et mesuré).
 - Dans electron-builder, `asarUnpack: ["**/node_modules/node-pty/**"]` : un `.node` ne se charge pas depuis une archive asar.
+
+**Versions verrouillées par l'écosystème (2026-08-22)** : `electron-vite@5` n'accepte pas encore Vite 8 — Vite est épinglé en `^7`, et `@vitejs/plugin-react` en `^5.2` (le `6.x` exige Vite 8). Par ailleurs `@xterm/addon-canvas@0.7` ne supporte pas xterm 6 ; le repli de rendu est donc le **renderer DOM intégré** d'xterm, sans dépendance supplémentaire.
 
 ### electron-builder
 
@@ -306,13 +308,22 @@ Pas de Playwright au MVP : le rapport coût/valeur d'un E2E Electron est mauvais
 - **Rationale** : la seule donnée durable est un layout de quelques kilo-octets et une liste de projets récents. Une DB ajouterait un second module natif à rebuilder, un schéma à migrer, et un état opaque — l'exact contraire du « la config est du texte versionnable » du PRD.
 - **Conséquences** : si l'historique revient un jour au scope, il faudra réintroduire un stockage. Assumé : le PRD l'exclut par construction, pas par manque de temps.
 
-### ADR-002 — `node-pty` malgré le coût de build
+### ADR-002 — `node-pty` officiel, sans étape de rebuild
 
-- **Contexte** : il faut de vrais PTY Windows (ConPTY) pour que Claude Code, `npm run dev` et `git rebase -i` se comportent normalement. `node-pty` est un module natif : rebuild contre l'ABI Electron, VS Build Tools et Python requis.
-- **Décision** : `node-pty` officiel, avec `electron-rebuild` en `postinstall`.
-- **Alternatives** : `@lydell/node-pty` (binaires précompilés pour Electron, zéro toolchain) ; `child_process.spawn` avec des pipes.
-- **Rationale** : `spawn` est éliminé d'office — sans PTY, pas de couleurs, pas de redimensionnement, et les CLI interactifs se comportent comme s'ils écrivaient dans un fichier. Entre les deux node-pty, l'officiel est celui de VS Code et de Switchboard : documentation, issues et correctifs ConPTY y arrivent en premier. Le coût de la toolchain est payé une fois sur une machine de dev qui l'a déjà.
-- **Conséquences** : la barrière à la contribution monte à l'open-sourcing (un contributeur doit installer VS Build Tools). Mitigation retenue si cela devient un frein : basculer sur le fork prebuilt, qui est API-compatible — la migration coûte une ligne de `package.json`.
+> **Révisé le 2026-08-22 après vérification empirique.** La version initiale de cet ADR affirmait qu'un rebuild contre l'ABI Electron était nécessaire et que VS Build Tools était un prérequis. **C'est faux pour `node-pty` 1.1.0.** Les mesures ci-dessous remplacent cette hypothèse.
+
+- **Contexte** : il faut de vrais PTY Windows (ConPTY) pour que Claude Code, `npm run dev` et `git rebase -i` se comportent normalement.
+- **Décision** : `node-pty` 1.1.0 officiel, installé tel quel. **Aucun `electron-rebuild`, aucun `postinstall`.**
+- **Alternatives** : `@lydell/node-pty` (fork prebuilt) ; `child_process.spawn` avec des pipes.
+- **Rationale** : `spawn` est éliminé d'office — sans PTY, pas de couleurs, pas de redimensionnement, et les CLI interactifs se comportent comme s'ils écrivaient dans un fichier. Quant au rebuild, la mesure le rend inutile : `node-pty` 1.1.0 embarque des binaires N-API dans `prebuilds/win32-x64/`, et **le même fichier `pty.node` se charge sous Node 24 (ABI 137) et sous Electron 43 (ABI 148)**. Le fork prebuilt perd donc sa raison d'être : l'officiel n'impose plus aucune toolchain.
+- **Conséquences** :
+  - La barrière à la contribution disparaît — un `npm install` suffit, sans Visual Studio ni Python.
+  - `electron-builder install-app-deps` est **retiré** du `postinstall` : il échoue sur `MSB8040` (bibliothèques Spectre absentes) en tentant de recompiler `deps/winpty`, la couche legacy pré-ConPTY dont nous n'avons pas l'usage.
+  - `asarUnpack` de `node-pty` reste requis au packaging (T18) : un `.node` ne se charge pas depuis une archive asar.
+
+**Comportement mesuré du kill (2026-08-22).** Sous Electron, la fermeture d'un PTY fait échouer le helper `conpty_console_list_agent` de node-pty avec `AttachConsole failed` — il n'a pas de console à attacher dans un process GUI. node-pty tombe alors dans son timeout de 5 s et se rabat sur « ne tuer que le shell ».
+
+Cela laissait craindre que les processus enfants (le `node.exe` derrière un `npm run dev`) survivent à la fermeture d'un pane. **Mesure faite sur trois stratégies — `pty.kill()` seul, `pty.kill()` + `taskkill /T /F`, et `useConptyDll` — les trois tuent l'enfant.** La destruction du pseudoconsole ConPTY suffit à terminer l'arbre attaché. Retenu : `useConpty: true` + `pty.kill()` simple, sans `taskkill`. L'erreur `AttachConsole` est du bruit cosmétique sur stderr d'un process transitoire, invisible dans l'application packagée.
 
 ### ADR-003 — Grille N×M rigide plutôt qu'un arbre de splits
 
@@ -460,7 +471,7 @@ Aligné sur les jalons M1–M5 du PRD.
 
 | Risque | Impact | Mitigation |
 |---|---|---|
-| `electron-rebuild` de node-pty échoue sur une machine sans VS Build Tools | Bloque le build | Basculer sur `@lydell/node-pty`, API-compatible (ADR-002) |
+| ~~`electron-rebuild` de node-pty échoue sans VS Build Tools~~ | — | **Levé le 2026-08-22** : prebuilds N-API, aucun rebuild nécessaire (ADR-002 révisé) |
 | Claude Code n'émet pas le BEL de façon fiable | Le badge `attention`, feature 4 du PRD, perd sa valeur | Vérifier empiriquement dès la Phase 2, avant de construire l'UI autour |
 | Contextes WebGL épuisés sur grandes grilles | Terminaux noirs | Fallback canvas implémenté en Phase 2 |
 | `.myterm.json` commité avec des chemins spécifiques à une machine | Conflits git récurrents | Surcharge `.myterm.local.json` non versionnée — question ouverte du PRD, à trancher au premier conflit réel |

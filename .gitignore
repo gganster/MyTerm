@@ -1,0 +1,16 @@
+node_modules/
+out/
+dist/
+release/
+
+# APEX run state (local bookkeeping, not project source)
+.agents/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+*.log
+
+# MyTerm local overrides (see PRD open question)
+.myterm.local.json
