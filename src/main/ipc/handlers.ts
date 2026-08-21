@@ -7,12 +7,16 @@ import type {
   ResolvedTheme,
   ThemeMode,
 } from '@shared/ipc-contract'
-import { PANE_STATUS } from '@shared/pane-status'
+import { OutputBatcher } from '../services/output-batcher'
+import { PaneStatusTracker } from '../services/pane-status-machine'
 import { PtyManager } from '../services/pty-manager'
 import { workspaceState } from '../services/workspace-state'
 import { getMainWindow } from '../window'
 
 let ptyManager: PtyManager | null = null
+let batcher: OutputBatcher | null = null
+let statusTracker: PaneStatusTracker | null = null
+let idleTimer: NodeJS.Timeout | null = null
 let registered = false
 
 /** Every push to the renderer goes through here: a destroyed window would crash the main process. */
@@ -29,24 +33,43 @@ export function getPtyManager(): PtyManager {
 
 export function registerIpcHandlers(): void {
   // ipcMain.handle throws on a duplicate channel; guard so a second call during
-  // development hot-restart cannot take the app down.
+  // a development hot-restart cannot take the app down.
   if (registered) return
   registered = true
 
+  batcher = new OutputBatcher({
+    emit: (paneId, chunk) => push(IPC.paneData, { paneId, chunk }),
+  })
+
+  statusTracker = new PaneStatusTracker((paneId, status, exitCode) => {
+    push(IPC.paneStatus, { paneId, status, exitCode })
+  })
+
   ptyManager = new PtyManager({
-    onData: (paneId, chunk) => push(IPC.paneData, { paneId, chunk }),
+    onData: (paneId, chunk) => {
+      // Status is read from the raw stream here, before batching, so the BEL is
+      // seen even for a pane the user is not looking at.
+      statusTracker?.output(paneId, chunk, Date.now())
+      batcher?.push(paneId, chunk)
+    },
     onExit: (paneId, exitCode) => {
+      // Flush first: the last output of a dying process must not be dropped.
+      batcher?.flush()
+      batcher?.remove(paneId)
+      statusTracker?.exit(paneId, exitCode, Date.now())
       push(IPC.paneExit, { paneId, exitCode })
-      push(IPC.paneStatus, { paneId, status: PANE_STATUS.exited, exitCode })
     },
   })
+
+  // Single low-frequency tick for the weak "silence means idle" signal. 400 ms
+  // is plenty: the badge is read by a human, not sampled.
+  idleTimer = setInterval(() => statusTracker?.tick(Date.now()), 400)
 
   // ---- panes -------------------------------------------------------------
 
   ipcMain.handle(IPC.paneSpawn, (_event, request: PaneSpawnRequest): PaneSpawnResult => {
     const pane = workspaceState.resolve(request.paneId)
-    // A cwd that no longer exists must not take the whole workspace down: fall
-    // back to the project root and let the pane report it (task 11).
+    // A cwd that vanished must not take the workspace down.
     const cwd = existsSync(pane.cwd) ? pane.cwd : app.getPath('home')
 
     const { pid } = getPtyManager().spawn({
@@ -57,12 +80,12 @@ export function registerIpcHandlers(): void {
       rows: request.rows,
     })
 
-    push(IPC.paneStatus, { paneId: request.paneId, status: PANE_STATUS.running })
+    statusTracker?.start(request.paneId, Date.now())
 
     if (pane.command) {
-      // Written as if the user typed it, rather than exec'ing a composed string:
-      // the shell stays interactive after the command ends and the command shows
-      // up in history (ARCHI § Sécurité, point 2).
+      // Written as if the user typed it, rather than exec'ing a composed
+      // string: the shell stays interactive afterwards and the command lands in
+      // history (ARCHI § Sécurité, point 2).
       getPtyManager().write(request.paneId, `${pane.command}\r`)
     }
 
@@ -70,6 +93,8 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle(IPC.paneWrite, (_event, paneId: string, data: string) => {
+    // Typing into a pane is the acknowledgement that clears `attention`.
+    statusTracker?.input(paneId, Date.now())
     getPtyManager().write(paneId, data)
   })
 
@@ -79,6 +104,8 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.paneKill, (_event, paneId: string) => {
     getPtyManager().kill(paneId)
+    batcher?.remove(paneId)
+    statusTracker?.remove(paneId)
   })
 
   // ---- workspace (filled in by tasks 10-16) --------------------------------
@@ -105,10 +132,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.prefsGet, () => ({}))
   ipcMain.handle(IPC.prefsSet, (_event, patch: unknown) => patch)
 
-  // ---- theme (task 05) -----------------------------------------------------
+  // ---- theme ---------------------------------------------------------------
 
-  ipcMain.handle(IPC.themeResolve, (): ResolvedTheme =>
-    nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+  ipcMain.handle(
+    IPC.themeResolve,
+    (): ResolvedTheme => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
   )
 
   ipcMain.handle(IPC.themeSet, (_event, mode: ThemeMode): ResolvedTheme => {
@@ -123,5 +151,8 @@ export function registerIpcHandlers(): void {
 
 /** A leaked pty leaves an orphan shell behind after the window is gone. */
 export function disposeIpc(): void {
+  if (idleTimer) clearInterval(idleTimer)
+  idleTimer = null
+  batcher?.dispose()
   ptyManager?.killAll()
 }

@@ -3,6 +3,7 @@ import type { Layout } from '@shared/schema/layout'
 import { LAYOUT_VERSION } from '@shared/schema/layout'
 import { GridView } from './components/Grid/GridView'
 import { ThemeToggle } from './components/ThemeToggle'
+import { useShortcuts } from './hooks/use-shortcuts'
 import { useStore } from './store'
 import { applyTheme } from './theme/apply'
 
@@ -28,6 +29,7 @@ const STAGING_LAYOUT: Layout = {
 }
 
 export function App(): React.JSX.Element {
+  useShortcuts()
   const projectName = useStore((state) => state.projectName)
   const setResolvedTheme = useStore((state) => state.setResolvedTheme)
   const replaceLayout = useStore((state) => state.replaceLayout)

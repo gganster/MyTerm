@@ -5,6 +5,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { paletteFor } from '../theme/palette'
 import type { ResolvedThemeName } from '../theme/palette'
 import type { TerminalHandle } from './registry'
+import { isAppShortcut } from '../hooks/use-shortcuts'
 
 export function ansiTheme(theme: ResolvedThemeName): ITheme {
   // A fresh object every time on purpose: xterm compares `theme` by reference,
@@ -25,6 +26,11 @@ export function createTerminal(theme: ResolvedThemeName): TerminalHandle {
 
   const fit = new FitAddon()
   terminal.loadAddon(fit)
+
+  // Returning false stops xterm from forwarding the key to the pty. Only the
+  // app's own Ctrl+Shift bindings are withheld; everything else, Ctrl+C first
+  // among them, belongs to whatever runs in the pane.
+  terminal.attachCustomKeyEventHandler((event) => !isAppShortcut(event))
 
   const handle: TerminalHandle = {
     terminal,
