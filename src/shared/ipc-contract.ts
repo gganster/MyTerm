@@ -16,6 +16,8 @@ export const IPC = {
   workspaceTrustDecide: 'workspace:trust-decide',
   workspaceForget: 'workspace:forget',
   workspaceRevokeTrust: 'workspace:revoke-trust',
+  workspaceReload: 'workspace:reload',
+  workspacePickPaneCwd: 'workspace:pick-pane-cwd',
   paneSpawn: 'pane:spawn',
   paneWrite: 'pane:write',
   paneResize: 'pane:resize',
@@ -34,6 +36,8 @@ export const IPC = {
   themeSystemChanged: 'theme:system-changed',
   /** CLI or second instance asked for a project to be opened. */
   appOpenProject: 'app:open-project',
+  appUpdateReady: 'app:update-ready',
+  appInstallUpdate: 'app:install-update',
 } as const
 
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -111,3 +115,7 @@ export type OpenWorkspaceResult =
   | { status: 'error'; projectPath: string; message: string }
 
 export type TrustDecision = 'approve' | 'open-without-executing' | 'cancel'
+
+export type SaveLayoutResult =
+  | { ok: true; warnings: { paneId: string; message: string }[] }
+  | { ok: false; problems: string[] }

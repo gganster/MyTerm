@@ -1,4 +1,5 @@
 import { existsSync, statSync } from 'node:fs'
+import { relative, sep } from 'node:path'
 import { app, dialog, ipcMain, nativeTheme } from 'electron'
 import { IPC } from '@shared/ipc-contract'
 import type {
@@ -7,9 +8,17 @@ import type {
   ResolvedTheme,
   ThemeMode,
 } from '@shared/ipc-contract'
-import type { OpenWorkspaceResult, TrustDecision } from '@shared/ipc-contract'
+import type { OpenWorkspaceResult, SaveLayoutResult, TrustDecision } from '@shared/ipc-contract'
 import type { Preferences } from '@shared/schema/preferences'
-import { decideTrust, openWorkspace, revokeTrust } from '../services/open-workspace'
+import {
+  closeWorkspace,
+  decideTrust,
+  openWorkspace,
+  reloadWorkspace,
+  revokeTrust,
+  saveWorkspace,
+  setDiskChangeListener,
+} from '../services/open-workspace'
 import {
   forgetProject,
   getPreferences,
@@ -19,7 +28,9 @@ import {
 import { OutputBatcher } from '../services/output-batcher'
 import { PaneStatusTracker } from '../services/pane-status-machine'
 import { PtyManager } from '../services/pty-manager'
+import { disposeUpdater, initUpdater, installUpdate } from '../services/updater'
 import { workspaceState } from '../services/workspace-state'
+import { isInsideRoot } from '../util/resolve-cwd'
 import { getMainWindow } from '../window'
 
 let ptyManager: PtyManager | null = null
@@ -154,11 +165,54 @@ export function registerIpcHandlers(): void {
     return getPreferencesForRenderer()
   })
 
-  ipcMain.handle(IPC.workspaceSave, (_event, _layout: unknown) => undefined)
+  ipcMain.handle(
+    IPC.workspaceSave,
+    (_event, layout: unknown): Promise<SaveLayoutResult> => saveWorkspace(layout),
+  )
+
+  ipcMain.handle(IPC.workspaceReload, (): Promise<OpenWorkspaceResult> => reloadWorkspace())
+
+  // Folder picker for a pane cwd. Returns a path *relative* to the project
+  // root: an absolute one would not survive the file being cloned elsewhere.
+  ipcMain.handle(IPC.workspacePickPaneCwd, async (): Promise<string | null> => {
+    const projectRoot = workspaceState.projectRoot
+    if (!projectRoot) return null
+    const window = getMainWindow()
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openDirectory'],
+      defaultPath: projectRoot,
+    }
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options)
+    const picked = result.filePaths[0]
+    if (result.canceled || !picked) return null
+    if (!isInsideRoot(projectRoot, picked)) return null
+    const relativePath = relative(projectRoot, picked)
+    return relativePath === '' ? '.' : relativePath.split(sep).join('/')
+  })
+
   ipcMain.handle(IPC.workspaceClose, () => {
     getPtyManager().killAll()
-    workspaceState.clear()
+    closeWorkspace()
   })
+
+  // The watcher lives in the main process; the renderer is only told that
+  // something changed and decides what to do about it.
+  setDiskChangeListener(() => push(IPC.workspaceChangedOnDisk, undefined))
+
+  // ---- updates -------------------------------------------------------------
+
+  const hasLivePanes = (): boolean => (ptyManager?.activeCount ?? 0) > 0
+
+  initUpdater({
+    onUpdateReady: (info) => push(IPC.appUpdateReady, info),
+    hasLivePanes,
+  })
+
+  ipcMain.handle(IPC.appInstallUpdate, (_event, force: boolean): boolean =>
+    installUpdate({ force, hasLivePanes }),
+  )
 
   // ---- preferences ---------------------------------------------------------
 
@@ -186,6 +240,7 @@ export function registerIpcHandlers(): void {
 
 /** A leaked pty leaves an orphan shell behind after the window is gone. */
 export function disposeIpc(): void {
+  disposeUpdater()
   if (idleTimer) clearInterval(idleTimer)
   idleTimer = null
   batcher?.dispose()

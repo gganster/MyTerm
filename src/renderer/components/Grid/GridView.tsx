@@ -13,6 +13,7 @@ export function GridView(): React.JSX.Element {
   const grid = useStore(selectGrid)
   const panes = useStore(selectPanes)
   const generation = useStore(selectGeneration)
+  const paneEpochs = useStore((state) => state.paneEpochs)
 
   return (
     <div
@@ -28,7 +29,7 @@ export function GridView(): React.JSX.Element {
         // generation prefix forces a remount when a *new* workspace is loaded,
         // whose ptys were just killed in the main process; within one workspace
         // the key is stable and panes survive edits untouched.
-        <PaneView key={`${generation}:${pane.id}`} pane={pane} />
+        <PaneView key={`${generation}:${pane.id}:${paneEpochs[pane.id] ?? 0}`} pane={pane} />
       ))}
     </div>
   )

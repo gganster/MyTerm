@@ -20,6 +20,7 @@ import type {
   PaneStatusEvent,
   OpenWorkspaceResult,
   ResolvedTheme,
+  SaveLayoutResult,
   ThemeMode,
   TrustDecision,
 } from '@shared/ipc-contract'
@@ -34,7 +35,10 @@ const api = {
   workspace: {
     open: (projectPath: string): Promise<OpenWorkspaceResult> =>
       ipcRenderer.invoke(IPC.workspaceOpen, projectPath),
-    save: (layout: unknown): Promise<void> => ipcRenderer.invoke(IPC.workspaceSave, layout),
+    save: (layout: unknown): Promise<SaveLayoutResult> =>
+      ipcRenderer.invoke(IPC.workspaceSave, layout),
+    reload: (): Promise<OpenWorkspaceResult> => ipcRenderer.invoke(IPC.workspaceReload),
+    pickPaneCwd: (): Promise<string | null> => ipcRenderer.invoke(IPC.workspacePickPaneCwd),
     pick: (): Promise<string | null> => ipcRenderer.invoke(IPC.workspacePick),
     close: (): Promise<void> => ipcRenderer.invoke(IPC.workspaceClose),
     trustDecide: (decision: TrustDecision): Promise<OpenWorkspaceResult | null> =>
@@ -71,6 +75,10 @@ const api = {
   app: {
     onOpenProjectRequest: (listener: (projectPath: string) => void): (() => void) =>
       subscribe<string>(IPC.appOpenProject, listener),
+    onUpdateReady: (listener: (info: { version: string }) => void): (() => void) =>
+      subscribe<{ version: string }>(IPC.appUpdateReady, listener),
+    installUpdate: (force: boolean): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.appInstallUpdate, force),
   },
 
   theme: {

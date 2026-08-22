@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import { MAX_RECENT_PROJECTS, PreferencesSchema, defaultPreferences } from '@shared/schema/preferences'
 import type { Preferences, RecentProject } from '@shared/schema/preferences'
+import { normaliseProjectPath } from '@shared/normalise-path'
 import { atomicWrite, serialiseJson } from '../util/atomic-write'
 
 /**
@@ -21,12 +22,6 @@ let writeTimer: NodeJS.Timeout | null = null
 
 function filePath(): string {
   return join(app.getPath('userData'), 'preferences.json')
-}
-
-/** Windows paths compare case-insensitively; normalise before matching. */
-export function normaliseProjectPath(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, '')
-  return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed
 }
 
 export async function loadPreferences(): Promise<Preferences> {

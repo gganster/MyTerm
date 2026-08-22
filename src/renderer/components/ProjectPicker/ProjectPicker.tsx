@@ -71,7 +71,7 @@ export function ProjectPicker({
   const recents = preferences?.recentProjects ?? []
 
   return (
-    <div className="flex h-full flex-col bg-surface text-text" data-project-picker>
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-surface text-text" data-project-picker>
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-xs">
         <span className="font-semibold">MyTerm</span>
         <div className="ml-auto">

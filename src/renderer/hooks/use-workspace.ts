@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { OpenWorkspaceResult, TrustSubject } from '@shared/ipc-contract'
 import { LayoutSchema } from '@shared/schema/layout'
+import { panesNeedingRestart } from '@shared/schema/layout-edit'
 import type { Preferences } from '@shared/schema/preferences'
 import { useStore } from '../store'
 
@@ -22,6 +23,9 @@ export interface WorkspaceController {
   pendingTrust: PendingTrust | null
   error: string | null
   warnings: { paneId: string; message: string }[]
+  changedOnDisk: boolean
+  reload: () => Promise<void>
+  dismissDiskChange: () => void
   open: (projectPath: string) => Promise<void>
   pick: () => Promise<void>
   close: () => Promise<void>
@@ -35,9 +39,12 @@ export function useWorkspace(): WorkspaceController {
   const [pendingTrust, setPendingTrust] = useState<PendingTrust | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<{ paneId: string; message: string }[]>([])
+  const [changedOnDisk, setChangedOnDisk] = useState(false)
 
   const openWorkspace = useStore((state) => state.openWorkspace)
   const closeWorkspace = useStore((state) => state.closeWorkspace)
+
+  useEffect(() => window.myterm.workspace.onChangedOnDisk(() => setChangedOnDisk(true)), [])
 
   useEffect(() => {
     void window.myterm.prefs.get().then((value) => setPreferences(value as Preferences))
@@ -93,11 +100,48 @@ export function useWorkspace(): WorkspaceController {
     if (picked) await open(picked)
   }, [open])
 
+  /**
+   * Applies an external edit, restarting only the panes whose spec changed.
+   * A renamed pane keeps its process: killing a dev server over a typo would
+   * be indefensible.
+   */
+  const reload = useCallback(async () => {
+    const result = await window.myterm.workspace.reload()
+    setChangedOnDisk(false)
+
+    if (result.status === 'error') {
+      setError(result.message)
+      return
+    }
+    if (result.status === 'needs-trust') {
+      setPendingTrust({
+        projectPath: result.projectPath,
+        projectName: result.projectName,
+        commands: result.commands,
+      })
+      return
+    }
+
+    const parsed = LayoutSchema.safeParse(result.layout)
+    if (!parsed.success) {
+      setError('le layout rechargé est invalide')
+      return
+    }
+
+    const state = useStore.getState()
+    const toRestart = panesNeedingRestart(state.layout, parsed.data)
+    state.replaceLayout(parsed.data, { markDirty: false })
+    for (const paneId of toRestart) state.restartPane(paneId)
+    setWarnings(result.warnings)
+    setError(null)
+  }, [])
+
   const close = useCallback(async () => {
     await window.myterm.workspace.close()
     closeWorkspace()
     setWarnings([])
     setPendingTrust(null)
+    setChangedOnDisk(false)
   }, [closeWorkspace])
 
   const decideTrust = useCallback(
@@ -122,6 +166,9 @@ export function useWorkspace(): WorkspaceController {
     pendingTrust,
     error,
     warnings,
+    changedOnDisk,
+    reload,
+    dismissDiskChange: () => setChangedOnDisk(false),
     open,
     pick,
     close,

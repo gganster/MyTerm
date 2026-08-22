@@ -1,0 +1,55 @@
+appId: dev.gganster.myterm
+productName: MyTerm
+copyright: MIT
+
+# node-pty ships N-API prebuilds that load under both Node and Electron, so
+# there is nothing to recompile (ADR-002, revised after measurement). Left on,
+# electron-builder invokes @electron/rebuild, which tries to build the bundled
+# legacy winpty and fails on machines without the Spectre-mitigated MSVC libs.
+# Re-enable this if a genuinely non-N-API native dependency is ever added.
+npmRebuild: false
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+
+extraResources:
+  # The CLI shim, copied to %LOCALAPPDATA%\MyTerm\bin by installer.nsh.
+  - from: resources/myterm.cmd
+    to: myterm.cmd
+
+# A .node binary cannot be loaded from inside an asar archive. Getting this
+# wrong produces an app that runs perfectly in development and shows six empty
+# panes once packaged (ARCHI § electron-builder).
+asarUnpack:
+  - '**/node_modules/node-pty/**'
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  # Per-user install: no UAC prompt, and uninstall leaves nothing machine-wide.
+  perMachine: false
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  include: build/installer.nsh
+  artifactName: ${productName}-${version}-setup.${ext}
+  # Unsigned for now: SmartScreen will warn. See ARCHI § Cost Estimation and the
+  # README; SignPath Foundation is the route for a signed open-source build.
+
+publish:
+  provider: github
+  owner: gganster
+  repo: myterm
+  releaseType: release

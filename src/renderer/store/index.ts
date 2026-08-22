@@ -28,6 +28,15 @@ interface WorkspaceSlice {
    * reloading a layout must leave running panes alone (task 16).
    */
   generation: number
+  /**
+   * Per-pane remount counter, appended to the React key.
+   *
+   * Reloading a layout from disk must restart only the panes whose spec
+   * actually changed: a title fix has no business killing a running dev server
+   * (task 16). Bumping one pane's epoch remounts exactly that pane.
+   */
+  paneEpochs: Record<string, number>
+  restartPane: (paneId: string) => void
   openWorkspace: (projectPath: string, projectName: string, layout: Layout) => void
   closeWorkspace: () => void
   replaceLayout: (layout: Layout, options?: { markDirty?: boolean }) => void
@@ -63,6 +72,12 @@ export const useStore = create<Store>()((set, get) => ({
   layout: defaultLayout(),
   dirty: false,
   generation: 0,
+  paneEpochs: {},
+
+  restartPane: (paneId) =>
+    set((state) => ({
+      paneEpochs: { ...state.paneEpochs, [paneId]: (state.paneEpochs[paneId] ?? 0) + 1 },
+    })),
 
   openWorkspace: (projectPath, projectName, layout) =>
     set((state) => ({
@@ -72,6 +87,7 @@ export const useStore = create<Store>()((set, get) => ({
       dirty: false,
       generation: state.generation + 1,
       // Opening a project never inherits the previous one's runtime or view state.
+      paneEpochs: {},
       runtime: {},
       focusedPaneId: layout.panes[0]?.id ?? null,
       zoomedPaneId: null,
@@ -83,6 +99,7 @@ export const useStore = create<Store>()((set, get) => ({
       projectName: null,
       layout: defaultLayout(),
       dirty: false,
+      paneEpochs: {},
       runtime: {},
       focusedPaneId: null,
       zoomedPaneId: null,
@@ -150,6 +167,11 @@ export const useStore = create<Store>()((set, get) => ({
 export const selectPanes = (state: Store): Pane[] => state.layout.panes
 export const selectGrid = (state: Store): Layout['grid'] => state.layout.grid
 export const selectGeneration = (state: Store): number => state.generation
+
+export const selectPaneKey =
+  (paneId: string) =>
+  (state: Store): string =>
+    `${state.generation}:${paneId}:${state.paneEpochs[paneId] ?? 0}`
 
 export const selectPaneStatus =
   (paneId: string) =>

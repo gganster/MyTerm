@@ -13,7 +13,11 @@ import {
   stripCommands,
   trustProject,
 } from './trust'
-import { readLayout, resolvePanes } from './workspace'
+import { readLayout, resolvePanes, writeLayout } from './workspace'
+import { markSelfWrite, stopWatching, watchLayout } from './workspace-watcher'
+import { serialiseJson } from '../util/atomic-write'
+import { LayoutSchema } from '@shared/schema/layout'
+import { formatZodError } from '@shared/schema/format-error'
 import { workspaceState } from './workspace-state'
 import type { ResolvedPane } from './workspace-state'
 
@@ -94,9 +98,17 @@ export function decideTrust(decision: TrustDecision): OpenWorkspaceResult | null
   return commit({ ...pending, panes: stripCommands(pending.panes) }, false)
 }
 
+let onDiskChange: (() => void) | null = null
+
+/** Registered once by the IPC layer so this module stays Electron-free. */
+export function setDiskChangeListener(listener: () => void): void {
+  onDiskChange = listener
+}
+
 function commit(pending: Pending, generated: boolean): OpenWorkspaceResult {
   workspaceState.load(pending.projectPath, pending.panes)
   rememberProject(pending.projectPath, pending.projectName)
+  watchLayout(pending.projectPath, () => onDiskChange?.())
 
   return {
     status: 'ok',
@@ -110,6 +122,79 @@ function commit(pending: Pending, generated: boolean): OpenWorkspaceResult {
 
 export function revokeTrust(projectPath: string): void {
   revokeProject(projectPath)
+}
+
+export function closeWorkspace(): void {
+  stopWatching()
+  workspaceState.clear()
+}
+
+export type SaveResult = { ok: true; warnings: Pending['warnings'] } | { ok: false; problems: string[] }
+
+/**
+ * Persists a layout edited inside the app.
+ *
+ * Trust is refreshed rather than re-asked: the user typed these commands here,
+ * which is consent by definition. The prompt exists for commands that arrive
+ * from a file someone else wrote.
+ */
+export async function saveWorkspace(raw: unknown): Promise<SaveResult> {
+  const projectRoot = workspaceState.projectRoot
+  if (!projectRoot) return { ok: false, problems: ['aucun projet ouvert'] }
+
+  const parsed = LayoutSchema.safeParse(raw)
+  if (!parsed.success) return { ok: false, problems: formatZodError(parsed.error) }
+
+  markSelfWrite(serialiseJson(parsed.data))
+  await writeLayout(projectRoot, parsed.data)
+
+  const { panes, warnings } = resolvePanes(projectRoot, parsed.data)
+  workspaceState.load(projectRoot, panes)
+  trustProject(projectRoot, commandsHash(panes))
+
+  return { ok: true, warnings }
+}
+
+/**
+ * Re-reads the file after an external edit.
+ *
+ * Unlike opening, this does not kill anything: the renderer diffs the layouts
+ * and restarts only the panes whose spec actually changed (task 16).
+ */
+export async function reloadWorkspace(): Promise<OpenWorkspaceResult> {
+  const projectRoot = workspaceState.projectRoot
+  if (!projectRoot) return { status: 'error', projectPath: '', message: 'aucun projet ouvert' }
+
+  const read = await readLayout(projectRoot)
+  if (!read.ok) {
+    // The workspace in memory keeps running; only the reload fails.
+    return { status: 'error', projectPath: projectRoot, message: describeFailure(read.failure) }
+  }
+
+  const layout = read.layout
+  const projectName = layout.name ?? basename(projectRoot)
+  const { panes, warnings } = resolvePanes(projectRoot, layout)
+
+  if (requiresApproval(projectRoot, panes)) {
+    pendingApproval = { projectPath: projectRoot, projectName, layout, panes, warnings }
+    return {
+      status: 'needs-trust',
+      projectPath: projectRoot,
+      projectName,
+      layout,
+      commands: commandsOf(panes),
+    }
+  }
+
+  workspaceState.load(projectRoot, panes)
+  return {
+    status: 'ok',
+    projectPath: projectRoot,
+    projectName,
+    layout,
+    warnings,
+    generated: false,
+  }
 }
 
 export function hasPendingApproval(): boolean {
