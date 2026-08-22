@@ -4,13 +4,15 @@
 
 **Depuis le PRD** — Un multiplexeur de terminaux desktop où chaque projet porte un `.myterm.json` versionnable décrivant sa grille de panes : combien, où, dans quel dossier, avec quelle commande lancée automatiquement. Ouvrir un projet reconstitue l'environnement complet en un clic. Aucune base de données, aucun historique : un « pane Claude » n'est qu'un terminal dont la commande d'autolaunch est `claude`. Le thème clair est un citoyen de première classe.
 
-**Stack (depuis ARCHI)** — Electron (`contextIsolation` + `sandbox`) · electron-vite · React 19 + TypeScript strict · Tailwind CSS v4 + shadcn/ui · Zustand · `@xterm/xterm` + addons fit/webgl/canvas · `node-pty` (ConPTY) · Zod · Vitest · electron-builder NSIS + electron-updater.
+**Stack (depuis ARCHI)** — Electron (`contextIsolation` + `sandbox`) · electron-vite · React 19 + TypeScript strict · Tailwind CSS v4 + primitives Radix · Zustand · `@xterm/xterm` + addons fit/webgl (repli DOM) · `node-pty` (ConPTY, prebuilds N-API) · Zod · Vitest · electron-builder NSIS + electron-updater.
 
-**État actuel** — Dépôt vierge : `PRD.md`, `ARCHI.md` et un `.git` sans commit. Aucun `package.json`, aucune ligne de code.
+**État actuel (2026-08-22)** — **Les 19 tâches sont implémentées et prouvées sur l'application réelle.**
 
-- ✅ Déjà implémenté : rien
-- 🚧 Partiellement implémenté : rien
-- ❌ À construire : la totalité des 19 tâches
+Chaque tâche a été validée en exécutant l'app, pas en relisant le code : un harnais CDP pilote le build réel, exécute les assertions dans le contexte de page et capture une capture d'écran. Les artefacts sont dans `.agents/apex/runs/<run>/proof/`.
+
+- ✅ Implémenté et prouvé : les 19 tâches
+- Suite unitaire : 79 tests Vitest, verts, et **mutation-testés** (5 régressions injectées, 5 détectées)
+- Non fait délibérément : exécuter l'installeur NSIS (modifie le PATH et le menu Démarrer de l'utilisateur) et publier sur GitHub — hors périmètre sans accord explicite
 
 ## Consignes d'exécution
 
@@ -27,34 +29,34 @@
 
 ### Phase 1 — Fondations (jalon M1)
 
-- [ ] `01-scaffold-electron-vite.md` — Scaffolder le projet Electron sécurisé · **2 h**
-- [ ] `02-node-pty-spike.md` — Faire démarrer un vrai PTY PowerShell (spike de risque) · **2-3 h**
-- [ ] `03-ipc-contract-preload.md` — Contrat IPC typé et surface preload · **2 h**
-- [ ] `04-single-terminal-pane.md` — Un pane terminal fonctionnel de bout en bout · **3 h**
-- [ ] `05-theme-system.md` — Thème light / dark / système, palette unifiée · **2-3 h**
+- [x] `01-scaffold-electron-vite.md` — Scaffolder le projet Electron sécurisé · **2 h**
+- [x] `02-node-pty-spike.md` — Faire démarrer un vrai PTY PowerShell (spike de risque) · **2-3 h**
+- [x] `03-ipc-contract-preload.md` — Contrat IPC typé et surface preload · **2 h**
+- [x] `04-single-terminal-pane.md` — Un pane terminal fonctionnel de bout en bout · **3 h**
+- [x] `05-theme-system.md` — Thème light / dark / système, palette unifiée · **2-3 h**
 
 ### Phase 2 — Cœur (jalons M2 et M3)
 
-- [ ] `06-grid-multipane.md` — Grille N×M multi-panes et cycle de vie des terminaux · **3 h**
-- [ ] `07-output-batcher.md` — Batching de la sortie PTY et contre-pression · **2 h**
-- [ ] `08-pane-status-badges.md` — Détection d'état des panes et badges d'activité · **3 h**
-- [ ] `09-focus-zoom-shortcuts.md` — Focus clavier, zoom plein écran et raccourcis · **2 h**
-- [ ] `10-layout-schema-zod.md` — Schéma Zod, écriture atomique, erreurs lisibles · **2-3 h**
-- [ ] `11-workspace-open-autolaunch.md` — Ouvrir un projet et reconstituer sa grille · **3 h**
+- [x] `06-grid-multipane.md` — Grille N×M multi-panes et cycle de vie des terminaux · **3 h**
+- [x] `07-output-batcher.md` — Batching de la sortie PTY et contre-pression · **2 h**
+- [x] `08-pane-status-badges.md` — Détection d'état des panes et badges d'activité · **3 h**
+- [x] `09-focus-zoom-shortcuts.md` — Focus clavier, zoom plein écran et raccourcis · **2 h**
+- [x] `10-layout-schema-zod.md` — Schéma Zod, écriture atomique, erreurs lisibles · **2-3 h**
+- [x] `11-workspace-open-autolaunch.md` — Ouvrir un projet et reconstituer sa grille · **3 h**
 
 ### Phase 3 — Intégration (jalons M3 et M4)
 
-- [ ] `12-workspace-trust.md` — Approbation des projets inconnus · **2 h**
-- [ ] `13-preferences-recent-projects.md` — Préférences globales et projets récents · **2 h**
-- [ ] `14-cli-single-instance.md` — CLI `myterm .` et instance unique · **2 h**
-- [ ] `15-layout-editor.md` — Éditeur de layout dans l'interface · **3 h**
-- [ ] `16-save-watch-reload.md` — Sauvegarde et détection d'édition externe · **2-3 h**
+- [x] `12-workspace-trust.md` — Approbation des projets inconnus · **2 h**
+- [x] `13-preferences-recent-projects.md` — Préférences globales et projets récents · **2 h**
+- [x] `14-cli-single-instance.md` — CLI `myterm .` et instance unique · **2 h**
+- [x] `15-layout-editor.md` — Éditeur de layout dans l'interface · **3 h**
+- [x] `16-save-watch-reload.md` — Sauvegarde et détection d'édition externe · **2-3 h**
 
 ### Phase 4 — Finition et distribution (jalon M5)
 
-- [ ] `17-vitest-pure-logic.md` — Suite Vitest sur la logique pure · **3 h**
-- [ ] `18-electron-builder-nsis.md` — Installeur NSIS et CLI dans le `PATH` · **2-3 h**
-- [ ] `19-auto-update-release.md` — Auto-update et workflow de release · **2-3 h**
+- [x] `17-vitest-pure-logic.md` — Suite Vitest sur la logique pure · **3 h**
+- [x] `18-electron-builder-nsis.md` — Installeur NSIS et CLI dans le `PATH` · **2-3 h**
+- [x] `19-auto-update-release.md` — Auto-update et workflow de release · **2-3 h**
 
 ## Carte des dépendances
 
@@ -113,6 +115,24 @@
 | Jalon M5 — distribution et publication | 17, 18, 19 |
 
 Aucune tâche orpheline : les 19 se rattachent à une feature, un parcours ou un jalon du PRD.
+
+## Écarts au plan, mesurés pendant l'implémentation
+
+| Point | Ce qui était prévu | Ce qui a été mesuré |
+|---|---|---|
+| ADR-002 `node-pty` | rebuild contre l'ABI Electron, VS Build Tools requis | **Faux** : prebuilds N-API, le même binaire charge sous Node 24 et Electron 43. Aucun rebuild, aucune toolchain. `postinstall` et `npmRebuild` supprimés |
+| Repli de rendu | addon canvas | `@xterm/addon-canvas@0.7` incompatible xterm 6 → repli sur le renderer DOM intégré |
+| Kill des enfants | `taskkill /T` peut-être nécessaire | Inutile : détruire le pseudoconsole ConPTY tue déjà l'arbre (3 stratégies comparées) |
+| Signal BEL (T08) | à valider | Valide : `terminal_bell` existe dans Claude Code, mais c'est un canal **configurable** — à documenter dans le README |
+| Vite | dernière version | Épinglé `^7` : `electron-vite@5` n'accepte pas encore Vite 8 |
+
+## Bugs trouvés par la preuve runtime, invisibles à la relecture
+
+1. **Panes fantômes à la réouverture** — rouvrir un projet tuait les PTY côté main mais les `PaneView` n'étaient pas remontés (clés React identiques) : la grille affichait un scrollback périmé au-dessus de shells morts. Corrigé par une génération de workspace dans la clé.
+2. **`argv` mal découpé** — dans l'événement `second-instance`, Electron passe la ligne de commande brute avec ses switches *avant* le chemin de l'app ; filtrer après avoir tranché prenait le chemin de l'app pour le projet.
+3. **`app.quit()` ne termine pas** de façon fiable avant `ready` — la seconde instance restait vivante. `app.exit(0)`.
+4. **Redémarrage avant sauvegarde** — le bouton « redémarrer ce pane » relançait avec l'ancienne spec tant que l'autosave (1 s) n'avait pas écrit.
+5. **PTY orphelins au rechargement du renderer** — Ctrl+R jetait les `PaneView` sans cleanup et repartait sur l'accueil, laissant six shells inatteignables jusqu'à la fermeture.
 
 ## Décisions ouvertes à trancher pendant l'implémentation
 

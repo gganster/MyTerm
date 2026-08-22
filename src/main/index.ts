@@ -1,7 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc-contract'
 import { parseCliArgs } from './cli-args'
-import { disposeIpc, registerIpcHandlers } from './ipc/handlers'
+import { disposeIpc, getPtyManager, registerIpcHandlers } from './ipc/handlers'
 import { flushPreferences, loadPreferences } from './services/preferences'
 import { createWindow, focusMainWindow, getMainWindow } from './window'
 
@@ -56,6 +56,17 @@ if (!app.requestSingleInstanceLock()) {
       queuedProjectPath = null
       if (pending) requestOpenProject(pending)
     })
+
+    // A renderer reload (Ctrl+R, a dev full reload, a crash) throws away every
+    // PaneView without running its cleanup, and the fresh renderer starts on
+    // the project picker. Without this the previous shells stay alive with
+    // nothing able to reach or close them — an invisible leak until quit.
+    let loadCount = 0
+    window.webContents.on('did-finish-load', () => {
+      loadCount += 1
+      if (loadCount > 1) getPtyManager().killAll()
+    })
+    window.webContents.on('render-process-gone', () => getPtyManager().killAll())
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()

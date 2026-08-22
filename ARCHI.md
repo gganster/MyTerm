@@ -22,7 +22,7 @@ Trois principes gouvernent toutes les décisions ci-dessous.
 | Runtime desktop | Electron (dernière version stable), `contextIsolation` + `sandbox` |
 | Build | electron-vite (main / preload / renderer) |
 | Packaging | electron-builder → NSIS x64 + electron-updater |
-| UI | React 19 + TypeScript strict + Tailwind CSS v4 + shadcn/ui |
+| UI | React 19 + TypeScript strict + Tailwind CSS v4 + primitives Radix (`@radix-ui/react-dialog`) |
 | Terminal (rendu) | `@xterm/xterm` + addons fit / webgl (repli renderer DOM) |
 | Terminal (process) | `node-pty` (ConPTY sous Windows) |
 | État renderer | Zustand |
@@ -77,9 +77,10 @@ Trois principes gouvernent toutes les décisions ci-dessous.
 - *Pourquoi* : la grille est un arbre de composants avec un état partagé (focus, zoom, badges) ; React est le choix par défaut et l'écosystème xterm/Electron l'assume.
 - *Trade-off* : le modèle de rendu React est mal adapté à un flux de 60 mises à jour/seconde. On le contourne en gardant le terminal hors du cycle React — React ne rend que le *chrome* autour du terminal.
 
-**Tailwind CSS v4 + shadcn/ui**
-- *Pourquoi* : le thème light/dark/system du PRD est la feature n°5, et Tailwind v4 expose ses tokens en variables CSS natives (`@theme`). Un basculement de thème devient un changement d'attribut sur `<html>`, sans re-render React. shadcn/ui fournit dialog, select, input, tooltip, dropdown — les cinq composants dont l'éditeur de layout a besoin, copiés dans le repo donc modifiables.
-- *Trade-off* : shadcn amène Radix UI (~40 Ko gzip) pour une poignée de composants. Acceptable : ce sont exactement les composants les plus pénibles à écrire correctement (focus trap, navigation clavier, accessibilité) et une app Electron n'a pas de budget de téléchargement.
+**Tailwind CSS v4 + primitives Radix**
+- *Pourquoi* : le thème light/dark/system du PRD est la feature n°5, et Tailwind v4 expose ses tokens en variables CSS natives (`@theme`). Un basculement de thème devient un changement d'attribut sur `<html>`, sans re-render React. Le seul composant qu'il serait déraisonnable d'écrire à la main est la dialog de confiance : une invite de sécurité au focus trap cassé est pire que pas d'invite du tout.
+- *Mise en œuvre* : les primitives Radix sont utilisées directement (`@radix-ui/react-dialog`) plutôt que via le générateur shadcn, qui suppose une arborescence Next.js. Le bénéfice visé — focus trap, navigation clavier, accessibilité correcte sur la dialog de confiance — est le même ; le reste de l'UI est écrit à la main avec Tailwind.
+- *Trade-off* : Radix UI pèse ~40 Ko gzip pour un seul composant. Acceptable : ce sont exactement les composants les plus pénibles à écrire correctement (focus trap, navigation clavier, accessibilité) et une app Electron n'a pas de budget de téléchargement.
 - *Alternative écartée* : composants maison. Économise ~40 Ko dans un binaire de 150 Mo — un faux gain, payé en bugs de clavier.
 
 ### State Management
@@ -218,6 +219,8 @@ L'app exécute des commandes arbitraires décrites dans un fichier **commité da
 
 1. **Trust prompt à la première ouverture** d'un chemin de projet inconnu : la liste des commandes d'autolaunch est affichée, l'utilisateur approuve ou ouvre en mode « panes vierges » (grille restaurée, aucune commande exécutée). Le chemin approuvé est mémorisé dans les préférences globales. Une commande qui *change* dans un projet déjà approuvé redemande une approbation.
 2. **Pas de shell interprétant une chaîne composée.** La commande est écrite dans le PTY comme une ligne de saisie utilisateur après le démarrage du shell, exactement comme si l'utilisateur l'avait tapée — pas de `exec` d'une chaîne concaténée avec des variables. Le shell reste interactif et le pane survit à la fin de la commande.
+**Portée exacte du modèle de menace.** Le trust prompt protège contre un **contenu de dépôt hostile** — un `.myterm.json` écrit par quelqu'un d'autre. Il ne prétend pas résister à un renderer compromis : `workspace:save` réapprouve automatiquement les commandes, puisque l'utilisateur vient de les écrire lui-même dans l'éditeur, et un renderer contrôlé par un attaquant pourrait emprunter ce chemin. Exiger une approbation pour une commande que l'utilisateur vient de taper serait par ailleurs le meilleur moyen de lui apprendre à cliquer sans lire. La portée de cette auto-approbation reste bornée au projet déjà ouvert : le renderer ne choisit jamais la racine du projet.
+
 3. **`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.** Le preload n'utilise que `contextBridge` + `ipcRenderer`, tous deux disponibles en sandbox ; aucun module Node n'a besoin d'être chargé côté renderer.
 4. **Aucun contenu distant.** Le renderer ne charge que des fichiers locaux, `webSecurity` reste activé, et `will-navigate` / `setWindowOpenHandler` sont bloqués.
 
@@ -339,7 +342,7 @@ Cela laissait craindre que les processus enfants (le `node.exe` derrière un `np
 - **Décision** : approbation explicite à la première ouverture d'un chemin inconnu ; mode « panes vierges » en alternative ; ré-approbation si les commandes changent.
 - **Alternatives** : ne rien faire (l'utilisateur est seul sur sa machine) ; config centralisée hors du repo (rejetée par le PRD).
 - **Rationale** : c'est le prix de la décision produit de commiter le fichier. Le coût est d'une boîte de dialogue vue une fois par projet ; le risque évité est l'exécution de code arbitraire au clic. VS Code a exactement ce mécanisme pour exactement cette raison.
-- **Conséquences** : une friction minime au premier lancement, et une décision de sécurité prise avant l'open-sourcing plutôt qu'après un rapport de vulnérabilité.
+- **Conséquences** : une friction minime au premier lancement, et une décision de sécurité prise avant l'open-sourcing plutôt qu'après un rapport de vulnérabilité. Limite assumée et documentée : une sauvegarde depuis l'éditeur réapprouve les commandes sans redemander, ce qui borne la garantie au contenu de dépôt hostile et non à un renderer compromis.
 
 ### ADR-005 — Batching à 16 ms plutôt que canal dédié par pane
 
@@ -406,7 +409,7 @@ MyTerm/
         │   ├── Grid/            # GridView, PaneView, PaneBadge, PaneHeader
         │   ├── LayoutEditor/
         │   ├── TrustDialog/
-        │   └── ui/              # shadcn
+        │   └── ui/              # primitives partagées
         └── styles/globals.css   # @theme Tailwind v4
 ```
 
