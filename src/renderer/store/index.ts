@@ -18,6 +18,16 @@ interface WorkspaceSlice {
   projectName: string | null
   layout: Layout
   dirty: boolean
+  /**
+   * Bumped on every workspace *load*, and used in the grid's React keys.
+   *
+   * Opening a project kills the previous project's ptys in the main process.
+   * Without a changing key, panes that keep the same id are not remounted, so
+   * their effect never re-runs and they sit there showing stale scrollback over
+   * a dead shell. Deliberately NOT bumped by replaceLayout: editing or
+   * reloading a layout must leave running panes alone (task 16).
+   */
+  generation: number
   openWorkspace: (projectPath: string, projectName: string, layout: Layout) => void
   closeWorkspace: () => void
   replaceLayout: (layout: Layout, options?: { markDirty?: boolean }) => void
@@ -52,18 +62,20 @@ export const useStore = create<Store>()((set, get) => ({
   projectName: null,
   layout: defaultLayout(),
   dirty: false,
+  generation: 0,
 
   openWorkspace: (projectPath, projectName, layout) =>
-    set({
+    set((state) => ({
       projectPath,
       projectName,
       layout,
       dirty: false,
+      generation: state.generation + 1,
       // Opening a project never inherits the previous one's runtime or view state.
       runtime: {},
       focusedPaneId: layout.panes[0]?.id ?? null,
       zoomedPaneId: null,
-    }),
+    })),
 
   closeWorkspace: () =>
     set({
@@ -137,6 +149,7 @@ export const useStore = create<Store>()((set, get) => ({
 
 export const selectPanes = (state: Store): Pane[] => state.layout.panes
 export const selectGrid = (state: Store): Layout['grid'] => state.layout.grid
+export const selectGeneration = (state: Store): number => state.generation
 
 export const selectPaneStatus =
   (paneId: string) =>

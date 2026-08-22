@@ -13,6 +13,9 @@ export const IPC = {
   workspaceSave: 'workspace:save',
   workspacePick: 'workspace:pick',
   workspaceClose: 'workspace:close',
+  workspaceTrustDecide: 'workspace:trust-decide',
+  workspaceForget: 'workspace:forget',
+  workspaceRevokeTrust: 'workspace:revoke-trust',
   paneSpawn: 'pane:spawn',
   paneWrite: 'pane:write',
   paneResize: 'pane:resize',
@@ -71,3 +74,38 @@ export interface PaneExitEvent {
   paneId: string
   exitCode: number
 }
+
+/** One autolaunch command, shown verbatim in the trust dialog (ADR-004). */
+export interface TrustSubject {
+  paneId: string
+  title: string
+  cwd: string
+  shell: string
+  command: string
+}
+
+/**
+ * Result of opening a project. `needs-trust` is not an error: the layout was
+ * read and is valid, but nothing has been spawned and nothing will be until the
+ * user answers.
+ */
+export type OpenWorkspaceResult =
+  | {
+      status: 'ok'
+      projectPath: string
+      projectName: string
+      layout: unknown
+      warnings: { paneId: string; message: string }[]
+      /** No .myterm.json was found; this layout is in memory only. */
+      generated: boolean
+    }
+  | {
+      status: 'needs-trust'
+      projectPath: string
+      projectName: string
+      layout: unknown
+      commands: TrustSubject[]
+    }
+  | { status: 'error'; projectPath: string; message: string }
+
+export type TrustDecision = 'approve' | 'open-without-executing' | 'cancel'

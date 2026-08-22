@@ -16,6 +16,7 @@
     "dist": "npm run build && electron-builder --win"
   },
   "devDependencies": {
+    "@radix-ui/react-dialog": "^1.1.23",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",

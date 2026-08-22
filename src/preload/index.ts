@@ -18,8 +18,10 @@ import type {
   PaneSpawnRequest,
   PaneSpawnResult,
   PaneStatusEvent,
+  OpenWorkspaceResult,
   ResolvedTheme,
   ThemeMode,
+  TrustDecision,
 } from '@shared/ipc-contract'
 
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
@@ -30,11 +32,17 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 
 const api = {
   workspace: {
-    open: (projectPath: string): Promise<unknown> =>
+    open: (projectPath: string): Promise<OpenWorkspaceResult> =>
       ipcRenderer.invoke(IPC.workspaceOpen, projectPath),
     save: (layout: unknown): Promise<void> => ipcRenderer.invoke(IPC.workspaceSave, layout),
     pick: (): Promise<string | null> => ipcRenderer.invoke(IPC.workspacePick),
     close: (): Promise<void> => ipcRenderer.invoke(IPC.workspaceClose),
+    trustDecide: (decision: TrustDecision): Promise<OpenWorkspaceResult | null> =>
+      ipcRenderer.invoke(IPC.workspaceTrustDecide, decision),
+    revokeTrust: (projectPath: string): Promise<unknown> =>
+      ipcRenderer.invoke(IPC.workspaceRevokeTrust, projectPath),
+    forget: (projectPath: string): Promise<unknown> =>
+      ipcRenderer.invoke(IPC.workspaceForget, projectPath),
     onChangedOnDisk: (listener: () => void): (() => void) =>
       subscribe<void>(IPC.workspaceChangedOnDisk, listener),
   },

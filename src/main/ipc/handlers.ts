@@ -7,6 +7,15 @@ import type {
   ResolvedTheme,
   ThemeMode,
 } from '@shared/ipc-contract'
+import type { OpenWorkspaceResult, TrustDecision } from '@shared/ipc-contract'
+import type { Preferences } from '@shared/schema/preferences'
+import { decideTrust, openWorkspace, revokeTrust } from '../services/open-workspace'
+import {
+  forgetProject,
+  getPreferences,
+  getPreferencesForRenderer,
+  updatePreferences,
+} from '../services/preferences'
 import { OutputBatcher } from '../services/output-batcher'
 import { PaneStatusTracker } from '../services/pane-status-machine'
 import { PtyManager } from '../services/pty-manager'
@@ -120,17 +129,43 @@ export function registerIpcHandlers(): void {
     return statSync(picked).isDirectory() ? picked : null
   })
 
-  ipcMain.handle(IPC.workspaceOpen, (_event, _projectPath: string) => null)
+  ipcMain.handle(
+    IPC.workspaceOpen,
+    async (_event, projectPath: string): Promise<OpenWorkspaceResult> => {
+      // Switching projects must not leave the previous one's shells running.
+      getPtyManager().killAll()
+      workspaceState.clear()
+      return openWorkspace(projectPath)
+    },
+  )
+
+  ipcMain.handle(
+    IPC.workspaceTrustDecide,
+    (_event, decision: TrustDecision): OpenWorkspaceResult | null => decideTrust(decision),
+  )
+
+  ipcMain.handle(IPC.workspaceRevokeTrust, (_event, projectPath: string) => {
+    revokeTrust(projectPath)
+    return getPreferencesForRenderer()
+  })
+
+  ipcMain.handle(IPC.workspaceForget, (_event, projectPath: string): Preferences => {
+    forgetProject(projectPath)
+    return getPreferencesForRenderer()
+  })
+
   ipcMain.handle(IPC.workspaceSave, (_event, _layout: unknown) => undefined)
   ipcMain.handle(IPC.workspaceClose, () => {
     getPtyManager().killAll()
     workspaceState.clear()
   })
 
-  // ---- preferences (task 13) ----------------------------------------------
+  // ---- preferences ---------------------------------------------------------
 
-  ipcMain.handle(IPC.prefsGet, () => ({}))
-  ipcMain.handle(IPC.prefsSet, (_event, patch: unknown) => patch)
+  ipcMain.handle(IPC.prefsGet, (): Preferences => getPreferencesForRenderer())
+  ipcMain.handle(IPC.prefsSet, (_event, patch: Partial<Preferences>): Preferences =>
+    updatePreferences(patch),
+  )
 
   // ---- theme ---------------------------------------------------------------
 

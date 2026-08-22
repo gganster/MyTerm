@@ -1,4 +1,4 @@
-import { selectGrid, selectPanes, useStore } from '../../store'
+import { selectGeneration, selectGrid, selectPanes, useStore } from '../../store'
 import { PaneView } from './PaneView'
 
 /**
@@ -12,6 +12,7 @@ import { PaneView } from './PaneView'
 export function GridView(): React.JSX.Element {
   const grid = useStore(selectGrid)
   const panes = useStore(selectPanes)
+  const generation = useStore(selectGeneration)
 
   return (
     <div
@@ -23,9 +24,11 @@ export function GridView(): React.JSX.Element {
       }}
     >
       {panes.map((pane) => (
-        // Key is the pane id, never the index: reordering must not tear down
-        // and recreate the terminals.
-        <PaneView key={pane.id} pane={pane} />
+        // Never the index — reordering must not recreate terminals. The
+        // generation prefix forces a remount when a *new* workspace is loaded,
+        // whose ptys were just killed in the main process; within one workspace
+        // the key is stable and panes survive edits untouched.
+        <PaneView key={`${generation}:${pane.id}`} pane={pane} />
       ))}
     </div>
   )
