@@ -1,4 +1,4 @@
-import { LayoutSchema, MAX_COLS, MAX_ROWS } from './layout'
+import { LayoutSchema, MAX_PANES } from './layout'
 import type { Layout, Pane } from './layout'
 
 /**
@@ -20,34 +20,25 @@ function validated(layout: Layout): EditResult {
   return { ok: true, layout: result.data }
 }
 
-export function freeCell(layout: Layout): { col: number; row: number } | null {
-  for (let row = 0; row < layout.grid.rows; row++) {
-    for (let col = 0; col < layout.grid.cols; col++) {
-      if (!layout.panes.some((pane) => pane.col === col && pane.row === row)) return { col, row }
-    }
-  }
-  return null
-}
-
 function uniqueId(layout: Layout): string {
   let index = layout.panes.length + 1
   while (layout.panes.some((pane) => pane.id === `pane-${index}`)) index++
   return `pane-${index}`
 }
 
+/** Appended at the end: position is order, and a new pane belongs last. */
 export function addPane(layout: Layout): EditResult {
-  const cell = freeCell(layout)
-  if (!cell) {
-    return { ok: false, message: 'la grille est pleine — agrandissez-la avant d’ajouter un pane' }
+  if (layout.panes.length >= MAX_PANES) {
+    return { ok: false, message: `un workspace ne peut pas dépasser ${MAX_PANES} panes` }
   }
   return validated({
     ...layout,
-    panes: [...layout.panes, { id: uniqueId(layout), title: '', cwd: '.', ...cell }],
+    panes: [...layout.panes, { id: uniqueId(layout), title: '', cwd: '.' }],
   })
 }
 
 export function removePane(layout: Layout, paneId: string): EditResult {
-  // An empty grid is not a state the app can be in.
+  // An empty workspace is not a state the app can be in.
   if (layout.panes.length <= 1) {
     return { ok: false, message: 'un workspace doit garder au moins un pane' }
   }
@@ -69,42 +60,26 @@ export function updatePane(layout: Layout, paneId: string, patch: Partial<Pane>)
   })
 }
 
-/** Swap is the only safe move: two panes can never share a cell. */
-export function swapPanes(layout: Layout, a: string, b: string): EditResult {
-  const first = layout.panes.find((pane) => pane.id === a)
-  const second = layout.panes.find((pane) => pane.id === b)
-  if (!first || !second) return { ok: false, message: 'pane introuvable' }
+/**
+ * Moves a pane one position earlier or later in the flow.
+ *
+ * The old grid needed a swap because two panes could not share a cell; an
+ * ordered list needs only a shift, and a shift is what the user means by
+ * "move this one up".
+ */
+export function movePane(layout: Layout, paneId: string, direction: 'up' | 'down'): EditResult {
+  const from = layout.panes.findIndex((pane) => pane.id === paneId)
+  if (from === -1) return { ok: false, message: 'pane introuvable' }
 
-  return validated({
-    ...layout,
-    panes: layout.panes.map((pane) => {
-      if (pane.id === a) return { ...pane, col: second.col, row: second.row }
-      if (pane.id === b) return { ...pane, col: first.col, row: first.row }
-      return pane
-    }),
-  })
-}
-
-export interface ResizeOutcome {
-  /** Panes that would fall outside the new grid. Never dropped silently. */
-  orphaned: Pane[]
-  apply: () => EditResult
-}
-
-export function resizeGrid(layout: Layout, cols: number, rows: number): ResizeOutcome {
-  const clampedCols = Math.min(Math.max(cols, 1), MAX_COLS)
-  const clampedRows = Math.min(Math.max(rows, 1), MAX_ROWS)
-  const orphaned = layout.panes.filter((pane) => pane.col >= clampedCols || pane.row >= clampedRows)
-
-  return {
-    orphaned,
-    apply: () =>
-      validated({
-        ...layout,
-        grid: { cols: clampedCols, rows: clampedRows },
-        panes: layout.panes.filter((pane) => !orphaned.includes(pane)),
-      }),
+  const to = direction === 'up' ? from - 1 : from + 1
+  if (to < 0 || to >= layout.panes.length) {
+    return { ok: false, message: 'ce pane est déjà à cette extrémité' }
   }
+
+  const panes = [...layout.panes]
+  const [moved] = panes.splice(from, 1)
+  panes.splice(to, 0, moved!)
+  return validated({ ...layout, panes })
 }
 
 /**

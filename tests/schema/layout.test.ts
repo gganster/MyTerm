@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { LayoutSchema, defaultLayout, paneShell } from '@shared/schema/layout'
+import {
+  LAYOUT_VERSION,
+  LayoutSchema,
+  MAX_PANES,
+  defaultLayout,
+  paneShell,
+} from '@shared/schema/layout'
 import { formatZodError } from '@shared/schema/format-error'
 
-/** The PRD's own example, used as the canonical valid layout. */
+/** The README's own example, used as the canonical valid layout. */
 const validLayout = {
-  version: 1,
+  version: LAYOUT_VERSION,
   name: 'demo',
-  grid: { cols: 3, rows: 2 },
   panes: [
-    { id: 'claude-1', title: 'Claude · feature', col: 0, row: 0 },
-    { id: 'web', title: 'frontend', col: 0, row: 1, cwd: 'frontend', command: 'npm run dev' },
-    { id: 'free', col: 2, row: 1 },
+    { id: 'claude-1', title: 'Claude · feature', command: 'claude' },
+    { id: 'web', title: 'frontend', cwd: 'frontend', command: 'npm run dev' },
+    { id: 'free' },
   ],
 }
 
@@ -21,7 +26,7 @@ function problemsOf(input: unknown): string[] {
 }
 
 describe('LayoutSchema', () => {
-  it('accepte le layout exemple du PRD', () => {
+  it('accepte le layout exemple du README', () => {
     const result = LayoutSchema.safeParse(validLayout)
     expect(result.success).toBe(true)
   })
@@ -34,53 +39,52 @@ describe('LayoutSchema', () => {
     expect(parsed.panes[2]).toMatchObject({ title: '', cwd: '.' })
   })
 
+  it("conserve l'ordre déclaré : la position est l'ordre", () => {
+    const parsed = LayoutSchema.parse(validLayout)
+    expect(parsed.panes.map((pane) => pane.id)).toEqual(['claude-1', 'web', 'free'])
+  })
+
+  it("ne conserve pas les coordonnées d'un ancien fichier", () => {
+    // A v1 file reaches the schema already migrated; a stray col/row must not
+    // survive into the object the app writes back.
+    const parsed = LayoutSchema.parse({
+      ...validLayout,
+      panes: [{ id: 'a', col: 2, row: 1 }],
+    })
+    expect(parsed.panes[0]).not.toHaveProperty('col')
+    expect(parsed.panes[0]).not.toHaveProperty('row')
+  })
+
   it('refuse deux panes portant le même identifiant, en nommant le coupable', () => {
     const problems = problemsOf({
       ...validLayout,
-      panes: [
-        { id: 'dup', col: 0, row: 0 },
-        { id: 'dup', col: 1, row: 0 },
-      ],
+      panes: [{ id: 'dup' }, { id: 'dup' }],
     })
     expect(problems.join('\n')).toContain('dup')
     expect(problems.join('\n')).toContain('panes.1.id')
   })
 
-  it('refuse un pane hors de la grille en citant la limite', () => {
-    const problems = problemsOf({
-      ...validLayout,
-      grid: { cols: 2, rows: 1 },
-      panes: [{ id: 'oob', col: 5, row: 0 }],
-    })
-    expect(problems.join('\n')).toContain('panes.0.col')
-    expect(problems.join('\n')).toContain('grid.cols (2)')
-  })
-
-  it('refuse deux panes sur la même cellule', () => {
-    const problems = problemsOf({
-      ...validLayout,
-      panes: [
-        { id: 'a', col: 0, row: 0 },
-        { id: 'b', col: 0, row: 0 },
-      ],
-    })
-    expect(problems.join('\n')).toContain('déjà occupée')
-  })
-
-  it('refuse une version future plutôt que de l’interpréter à moitié', () => {
-    expect(LayoutSchema.safeParse({ ...validLayout, version: 2 }).success).toBe(false)
-  })
-
-  it('refuse une grille plus grande que la limite', () => {
-    expect(LayoutSchema.safeParse({ ...validLayout, grid: { cols: 99, rows: 1 } }).success).toBe(
+  it("refuse une version future plutôt que de l'interpréter à moitié", () => {
+    expect(LayoutSchema.safeParse({ ...validLayout, version: LAYOUT_VERSION + 1 }).success).toBe(
       false,
     )
   })
 
+  it('refuse un fichier v1 non migré', () => {
+    expect(LayoutSchema.safeParse({ ...validLayout, version: 1 }).success).toBe(false)
+  })
+
+  it('refuse un workspace sans aucun pane', () => {
+    expect(LayoutSchema.safeParse({ ...validLayout, panes: [] }).success).toBe(false)
+  })
+
+  it('refuse plus de panes que la limite', () => {
+    const panes = Array.from({ length: MAX_PANES + 1 }, (_, index) => ({ id: `pane-${index}` }))
+    expect(LayoutSchema.safeParse({ ...validLayout, panes }).success).toBe(false)
+  })
+
   it('refuse un identifiant vide', () => {
-    expect(
-      LayoutSchema.safeParse({ ...validLayout, panes: [{ id: '', col: 0, row: 0 }] }).success,
-    ).toBe(false)
+    expect(LayoutSchema.safeParse({ ...validLayout, panes: [{ id: '' }] }).success).toBe(false)
   })
 })
 
@@ -94,7 +98,7 @@ describe('paneShell', () => {
     const layout = LayoutSchema.parse({
       ...validLayout,
       defaults: { shell: 'pwsh', cwd: '.' },
-      panes: [{ id: 'a', col: 0, row: 0, shell: 'cmd' }],
+      panes: [{ id: 'a', shell: 'cmd' }],
     })
     expect(paneShell(layout, layout.panes[0]!)).toBe('cmd')
   })

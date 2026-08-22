@@ -1,15 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Layout, Pane, Shell } from '@shared/schema/layout'
-import { MAX_COLS, MAX_ROWS, SHELLS } from '@shared/schema/layout'
-import {
-  addPane,
-  removePane,
-  resizeGrid,
-  swapPanes,
-  updatePane,
-} from '@shared/schema/layout-edit'
+import { MAX_PANES, SHELLS } from '@shared/schema/layout'
+import { addPane, movePane, removePane, updatePane } from '@shared/schema/layout-edit'
 import type { EditResult } from '@shared/schema/layout-edit'
-import { useStore } from '../../store'
+import { selectPane } from '../../pane-focus'
+import { selectColumns, useStore } from '../../store'
 
 interface LayoutEditorProps {
   onClose: () => void
@@ -23,13 +18,42 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
   const layout = useStore((state) => state.layout)
   const replaceLayout = useStore((state) => state.replaceLayout)
   const focusedPaneId = useStore((state) => state.focusedPaneId)
-  const runtime = useStore((state) => state.runtime)
+  const columns = useStore(selectColumns)
 
-  const [selectedId, setSelectedId] = useState<string>(focusedPaneId ?? layout.panes[0]?.id ?? '')
   const [error, setError] = useState<string | null>(null)
   const [pendingRestart, setPendingRestart] = useState<Set<string>>(new Set())
 
-  const selected = layout.panes.find((pane) => pane.id === selectedId) ?? layout.panes[0]
+  // The edited pane *is* the focused one, rather than a second selection the
+  // editor keeps to itself. Clicking a terminal in the grid therefore switches
+  // what this panel edits — which is the only reading of "selected" that
+  // survives having the real panes right next to the form.
+  const selected = layout.panes.find((pane) => pane.id === focusedPaneId) ?? layout.panes[0]
+
+  const order = layout.panes.map((pane) => pane.id).join(',')
+
+  // With a dozen panes the list scrolls, so a pane picked over in the grid — or
+  // walked past with the arrows — could be selected somewhere out of sight. The
+  // list has its own scroll box so this can never push the form below the fold.
+  const listRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!selected) return
+    listRef.current
+      ?.querySelector(`[data-editor-pane="${CSS.escape(selected.id)}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [selected?.id, order])
+
+  // A pane that no longer exists cannot need a restart — and `uniqueId` reuses
+  // freed names, so a stale entry would hand a brand-new pane a "restart
+  // required" it never earned, offering to kill a shell that just started.
+  useEffect(() => {
+    setPendingRestart((current) => {
+      if (current.size === 0) return current
+      const alive = new Set(layout.panes.map((pane) => pane.id))
+      if ([...current].every((id) => alive.has(id))) return current
+      return new Set([...current].filter((id) => alive.has(id)))
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order])
 
   const apply = (result: EditResult, restartPaneId?: string): void => {
     if (!result.ok) {
@@ -59,18 +83,6 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
       next.delete(paneId)
       return next
     })
-  }
-
-  const changeGrid = (cols: number, rows: number): void => {
-    const outcome = resizeGrid(layout, cols, rows)
-    if (outcome.orphaned.length > 0) {
-      const names = outcome.orphaned.map((pane) => pane.title || pane.id).join(', ')
-      // Never a silent loss: shrinking the grid says exactly what it will drop.
-      if (!window.confirm(`Réduire la grille supprimera ${outcome.orphaned.length} pane(s) : ${names}.\n\nContinuer ?`)) {
-        return
-      }
-    }
-    apply(outcome.apply())
   }
 
   const pickFolder = async (): Promise<void> => {
@@ -104,63 +116,82 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
         </p>
       ) : null}
 
-      <section className="flex items-end gap-2">
-        <label className="flex flex-col gap-1 text-[11px] text-text-muted">
-          Colonnes
-          <input
-            type="number"
-            min={1}
-            max={MAX_COLS}
-            value={layout.grid.cols}
-            data-grid-cols
-            onChange={(event) => changeGrid(Number(event.target.value), layout.grid.rows)}
-            className="w-16 rounded border border-border bg-surface px-1.5 py-1 text-xs text-text"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-[11px] text-text-muted">
-          Lignes
-          <input
-            type="number"
-            min={1}
-            max={MAX_ROWS}
-            value={layout.grid.rows}
-            data-grid-rows
-            onChange={(event) => changeGrid(layout.grid.cols, Number(event.target.value))}
-            className="w-16 rounded border border-border bg-surface px-1.5 py-1 text-xs text-text"
-          />
-        </label>
+      <section className="flex items-center gap-2">
+        <p data-layout-hint className="text-[11px] leading-tight text-text-muted">
+          Disposition automatique :{' '}
+          <strong className="font-medium text-text">
+            {columns} pane{columns > 1 ? 's' : ''} par ligne
+          </strong>{' '}
+          à cette largeur. Les suivants passent à la ligne.
+        </p>
         <button
           type="button"
           data-action="add-pane"
+          disabled={layout.panes.length >= MAX_PANES}
           onClick={() => apply(addPane(layout))}
-          className="ml-auto rounded bg-accent px-2 py-1 text-xs font-medium text-accent-contrast hover:opacity-90"
+          className="ml-auto shrink-0 rounded bg-accent px-2 py-1 text-xs font-medium text-accent-contrast hover:opacity-90 disabled:opacity-40"
         >
           + Pane
         </button>
       </section>
 
-      <section className="flex flex-col gap-1">
-        {layout.panes.map((pane) => (
-          <button
-            key={pane.id}
-            type="button"
-            data-editor-pane={pane.id}
-            onClick={() => setSelectedId(pane.id)}
-            className={[
-              'flex items-center gap-2 rounded border px-2 py-1 text-left text-xs',
-              pane.id === selected?.id
-                ? 'border-accent bg-surface text-text'
-                : 'border-border text-text-muted hover:bg-surface-sunken',
-            ].join(' ')}
-          >
-            <span className="font-mono text-[10px] text-text-muted">
-              {pane.col},{pane.row}
-            </span>
-            <span className="truncate">{pane.title || pane.id}</span>
+      <section ref={listRef} className="flex max-h-64 flex-col gap-1 overflow-y-auto">
+        {layout.panes.map((pane, index) => (
+          <div key={pane.id} className="flex items-stretch gap-1">
+            <button
+              type="button"
+              data-editor-pane={pane.id}
+              data-editor-selected={pane.id === selected?.id || undefined}
+              onClick={() => selectPane(pane.id)}
+              className={[
+                'flex min-w-0 flex-1 items-center gap-2 rounded border px-2 py-1 text-left text-xs',
+                pane.id === selected?.id
+                  ? 'border-accent bg-surface text-text'
+                  : 'border-border text-text-muted hover:bg-surface-sunken',
+              ].join(' ')}
+            >
+              <span className="font-mono text-[10px] text-text-muted">{index + 1}</span>
+              <span className="truncate">{pane.title || pane.id}</span>
+            </button>
+            {/* On the row, not only on the selected pane's form: selecting
+                another pane must not take away the action the user was about
+                to perform on this one. */}
             {pendingRestart.has(pane.id) ? (
-              <span className="ml-auto text-[10px] text-status-attention">redémarrage requis</span>
+              <button
+                type="button"
+                data-action="restart-pane-row"
+                data-pane-id={pane.id}
+                title="Redémarrer ce pane pour appliquer les modifications"
+                onClick={() => restart(pane.id)}
+                className="shrink-0 rounded border border-status-attention/50 bg-status-attention/10 px-1.5 text-[10px] text-status-attention"
+              >
+                redémarrer
+              </button>
             ) : null}
-          </button>
+            {/* Order is the layout, so reordering is the positioning control. */}
+            <button
+              type="button"
+              data-action="move-pane-up"
+              data-pane-id={pane.id}
+              aria-label={`Déplacer ${pane.title || pane.id} vers le haut`}
+              disabled={index === 0}
+              onClick={() => apply(movePane(layout, pane.id, 'up'))}
+              className="rounded border border-border px-1 text-[10px] text-text-muted hover:bg-surface-sunken disabled:opacity-30"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              data-action="move-pane-down"
+              data-pane-id={pane.id}
+              aria-label={`Déplacer ${pane.title || pane.id} vers le bas`}
+              disabled={index === layout.panes.length - 1}
+              onClick={() => apply(movePane(layout, pane.id, 'down'))}
+              className="rounded border border-border px-1 text-[10px] text-text-muted hover:bg-surface-sunken disabled:opacity-30"
+            >
+              ↓
+            </button>
+          </div>
         ))}
       </section>
 
@@ -239,30 +270,13 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
           ) : null}
 
           <div className="flex items-center gap-2 pt-1">
-            <select
-              data-swap-target
-              defaultValue=""
-              onChange={(event) => {
-                if (!event.target.value) return
-                apply(swapPanes(layout, selected.id, event.target.value))
-                event.target.value = ''
-              }}
-              className="min-w-0 flex-1 rounded border border-border bg-surface px-2 py-1 text-xs text-text"
-            >
-              <option value="">Échanger avec…</option>
-              {layout.panes
-                .filter((pane) => pane.id !== selected.id)
-                .map((pane) => (
-                  <option key={pane.id} value={pane.id}>
-                    {pane.title || pane.id}
-                  </option>
-                ))}
-            </select>
             <button
               type="button"
               data-action="remove-pane"
               onClick={() => {
-                const running = runtime[selected.id]?.status
+                // Read at click time rather than subscribed: the sidebar has
+                // no business re-rendering on every status tick.
+                const running = useStore.getState().runtime[selected.id]?.status
                 if (
                   running &&
                   running !== 'exited' &&
@@ -272,7 +286,7 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
                 }
                 apply(removePane(layout, selected.id))
               }}
-              className="rounded border border-border px-2 py-1 text-xs text-status-exited hover:bg-surface-sunken"
+              className="ml-auto rounded border border-border px-2 py-1 text-xs text-status-exited hover:bg-surface-sunken"
             >
               Supprimer
             </button>

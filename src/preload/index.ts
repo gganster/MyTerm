@@ -23,7 +23,9 @@ import type {
   SaveLayoutResult,
   ThemeMode,
   TrustDecision,
+  UsageSnapshot,
 } from '@shared/ipc-contract'
+import type { SystemLoad } from '@shared/system-load'
 
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
   const handler = (_event: IpcRendererEvent, payload: T): void => listener(payload)
@@ -79,6 +81,16 @@ const api = {
       subscribe<{ version: string }>(IPC.appUpdateReady, listener),
     installUpdate: (force: boolean): Promise<boolean> =>
       ipcRenderer.invoke(IPC.appInstallUpdate, force),
+  },
+
+  /** Status bar. Read-only: nothing here lets the renderer ask for an action. */
+  status: {
+    getUsage: (): Promise<UsageSnapshot> => ipcRenderer.invoke(IPC.statusUsageGet),
+    onUsage: (listener: (snapshot: UsageSnapshot) => void): (() => void) =>
+      subscribe<UsageSnapshot>(IPC.statusUsage, listener),
+    getLoad: (): Promise<SystemLoad> => ipcRenderer.invoke(IPC.statusLoadGet),
+    onLoad: (listener: (load: SystemLoad) => void): (() => void) =>
+      subscribe<SystemLoad>(IPC.statusLoad, listener),
   },
 
   theme: {

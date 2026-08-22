@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
-import type { Pane } from '@shared/schema/layout'
+import { neighbourIndex } from '@shared/responsive-grid'
+import { focusPane } from '../pane-focus'
 import { useStore } from '../store'
-import { getTerminal } from '../terminal/registry'
 
 /**
  * Application shortcuts, and the rule that keeps them from stealing the shell's
@@ -12,12 +12,34 @@ import { getTerminal } from '../terminal/registry'
  * are never intercepted — they belong to whatever is running in the pane.
  *
  *   Ctrl+Shift+Z        zoom / unzoom the focused pane
- *   Ctrl+Shift+arrows   move focus through the grid
+ *   Ctrl+Shift+arrows   move focus through the panes as they are laid out
  *   Ctrl+Shift+1..9     focus the nth pane
  *   Escape              unzoom, and only when something is zoomed
+ *
+ * They are also given up entirely while the caret is in a form field: in the
+ * layout editor, Ctrl+Shift+arrows means "extend the selection by word" and
+ * Ctrl+Shift+Z means undo. Stealing those would move the focus into a live
+ * shell mid-sentence.
  */
 
 const ARROWS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])
+
+/**
+ * Whether the keystroke belongs to something the user is typing into.
+ *
+ * xterm's own helper textarea is excluded: it is not a form field, it *is* the
+ * terminal, and the shortcuts exist precisely to work while it has focus.
+ */
+function isTextEntry(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.closest('.xterm')) return false
+  return (
+    target.isContentEditable ||
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  )
+}
 
 export function isAppShortcut(event: Pick<KeyboardEvent, 'ctrlKey' | 'shiftKey' | 'key'>): boolean {
   if (event.ctrlKey && event.shiftKey) {
@@ -42,30 +64,10 @@ declare global {
 }
 window.__mytermIsAppShortcut = isAppShortcut
 
-function focusPane(paneId: string): void {
-  useStore.getState().setFocusedPane(paneId)
-  getTerminal(paneId)?.terminal.focus()
-}
-
-/** Grid neighbour in a direction, or null at the edge — no wrap-around, which disorients. */
-function neighbour(panes: Pane[], from: Pane, key: string): Pane | null {
-  const [dCol, dRow] =
-    key === 'ArrowLeft'
-      ? [-1, 0]
-      : key === 'ArrowRight'
-        ? [1, 0]
-        : key === 'ArrowUp'
-          ? [0, -1]
-          : [0, 1]
-
-  const targetCol = from.col + dCol
-  const targetRow = from.row + dRow
-  return panes.find((pane) => pane.col === targetCol && pane.row === targetRow) ?? null
-}
-
 export function useShortcuts(): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (isTextEntry(event.target)) return
       if (!isAppShortcut(event)) return
       event.preventDefault()
       event.stopPropagation()
@@ -90,10 +92,11 @@ export function useShortcuts(): void {
       }
 
       if (ARROWS.has(event.key)) {
-        const current = panes.find((pane) => pane.id === state.focusedPaneId) ?? panes[0]
-        if (!current) return
-        const target = neighbour(panes, current, event.key)
-        if (target) focusPane(target.id)
+        const from = panes.findIndex((pane) => pane.id === state.focusedPaneId)
+        const current = from === -1 ? 0 : from
+        if (!panes[current]) return
+        const target = neighbourIndex(current, panes.length, state.columns, event.key)
+        if (target !== null) focusPane(panes[target]!.id)
       }
     }
 

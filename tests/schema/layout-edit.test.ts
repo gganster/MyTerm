@@ -1,39 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { LayoutSchema } from '@shared/schema/layout'
+import { LAYOUT_VERSION, LayoutSchema, MAX_PANES } from '@shared/schema/layout'
 import type { Layout } from '@shared/schema/layout'
 import {
   addPane,
+  movePane,
   panesNeedingRestart,
   removePane,
-  resizeGrid,
-  swapPanes,
   updatePane,
 } from '@shared/schema/layout-edit'
 
-function layoutOf(panes: unknown[], cols = 2, rows = 2): Layout {
-  return LayoutSchema.parse({ version: 1, grid: { cols, rows }, panes })
+function layoutOf(panes: unknown[]): Layout {
+  return LayoutSchema.parse({ version: LAYOUT_VERSION, panes })
 }
 
-const base = layoutOf([
-  { id: 'a', col: 0, row: 0, cwd: 'frontend', command: 'npm run dev' },
-  { id: 'b', col: 1, row: 0 },
-])
+const base = layoutOf([{ id: 'a', cwd: 'frontend', command: 'npm run dev' }, { id: 'b' }])
 
 describe('addPane', () => {
-  it('place le nouveau pane dans la première cellule libre', () => {
+  it('ajoute le nouveau pane à la fin du flux', () => {
     const result = addPane(base)
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.layout.panes).toHaveLength(3)
-    expect(result.layout.panes[2]).toMatchObject({ col: 0, row: 1 })
+    expect(result.layout.panes.map((pane) => pane.id)).toEqual(['a', 'b', 'pane-3'])
   })
 
-  it('refuse proprement quand la grille est pleine', () => {
-    const full = layoutOf([{ id: 'a', col: 0, row: 0 }], 1, 1)
+  it('refuse proprement au-delà de la limite de panes', () => {
+    const full = layoutOf(Array.from({ length: MAX_PANES }, (_, index) => ({ id: `p${index}` })))
     const result = addPane(full)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.message).toContain('pleine')
+    expect(result.message).toContain(String(MAX_PANES))
   })
 })
 
@@ -46,7 +41,7 @@ describe('removePane', () => {
   })
 
   it('refuse de vider complètement le workspace', () => {
-    const single = layoutOf([{ id: 'a', col: 0, row: 0 }], 1, 1)
+    const single = layoutOf([{ id: 'a' }])
     expect(removePane(single, 'a').ok).toBe(false)
   })
 })
@@ -60,41 +55,38 @@ describe('updatePane', () => {
   })
 
   it('rejette une modification qui rendrait le layout invalide', () => {
-    // Moving 'a' onto 'b' would put two panes in one cell.
-    const result = updatePane(base, 'a', { col: 1, row: 0 })
+    // Two panes would then share the id 'b'.
+    const result = updatePane(base, 'a', { id: 'b' })
     expect(result.ok).toBe(false)
   })
 })
 
-describe('swapPanes', () => {
-  it('échange les positions sans toucher au reste', () => {
-    const result = swapPanes(base, 'a', 'b')
+describe('movePane', () => {
+  it("remonte un pane d'un cran sans toucher au reste", () => {
+    const result = movePane(base, 'b', 'up')
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    const a = result.layout.panes.find((pane) => pane.id === 'a')!
-    const b = result.layout.panes.find((pane) => pane.id === 'b')!
-    expect(a).toMatchObject({ col: 1, row: 0, command: 'npm run dev' })
-    expect(b).toMatchObject({ col: 0, row: 0 })
-  })
-})
-
-describe('resizeGrid', () => {
-  it('annonce les panes qui sortiraient de la grille avant de rien faire', () => {
-    const outcome = resizeGrid(base, 1, 2)
-    expect(outcome.orphaned.map((pane) => pane.id)).toEqual(['b'])
-    // Nothing has changed yet: the caller decides after seeing the list.
-    expect(base.panes).toHaveLength(2)
+    expect(result.layout.panes.map((pane) => pane.id)).toEqual(['b', 'a'])
+    expect(result.layout.panes[1]).toMatchObject({ command: 'npm run dev' })
   })
 
-  it('applique la réduction en retirant exactement ces panes', () => {
-    const result = resizeGrid(base, 1, 2).apply()
+  it("descend un pane d'un cran", () => {
+    const result = movePane(base, 'a', 'down')
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.layout.panes.map((pane) => pane.id)).toEqual(['a'])
+    expect(result.layout.panes.map((pane) => pane.id)).toEqual(['b', 'a'])
   })
 
-  it("n'orpheline personne en agrandissant", () => {
-    expect(resizeGrid(base, 3, 3).orphaned).toHaveLength(0)
+  it('refuse de sortir des extrémités', () => {
+    expect(movePane(base, 'a', 'up').ok).toBe(false)
+    expect(movePane(base, 'b', 'down').ok).toBe(false)
+  })
+
+  it('refuse un pane inconnu', () => {
+    const result = movePane(base, 'inexistant', 'up')
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.message).toContain('introuvable')
   })
 })
 
@@ -106,8 +98,8 @@ describe('panesNeedingRestart', () => {
     expect(panesNeedingRestart(base, renamed.layout)).toEqual([])
   })
 
-  it('ignore un déplacement dans la grille', () => {
-    const moved = swapPanes(base, 'a', 'b')
+  it('ignore un déplacement dans le flux', () => {
+    const moved = movePane(base, 'a', 'down')
     expect(moved.ok).toBe(true)
     if (!moved.ok) return
     expect(panesNeedingRestart(base, moved.layout)).toEqual([])

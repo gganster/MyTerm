@@ -2,7 +2,7 @@
 
 ## Résumé du projet
 
-**Depuis le PRD** — Un multiplexeur de terminaux desktop où chaque projet porte un `.myterm.json` versionnable décrivant sa grille de panes : combien, où, dans quel dossier, avec quelle commande lancée automatiquement. Ouvrir un projet reconstitue l'environnement complet en un clic. Aucune base de données, aucun historique : un « pane Claude » n'est qu'un terminal dont la commande d'autolaunch est `claude`. Le thème clair est un citoyen de première classe.
+**Depuis le PRD** — Un multiplexeur de terminaux desktop où chaque projet porte un `.myterm.json` versionnable décrivant ses panes : combien, dans quel ordre, dans quel dossier, avec quelle commande lancée automatiquement (la disposition, elle, suit la largeur de la fenêtre — ADR-003). Ouvrir un projet reconstitue l'environnement complet en un clic. Aucune base de données, aucun historique : un « pane Claude » n'est qu'un terminal dont la commande d'autolaunch est `claude`. Le thème clair est un citoyen de première classe.
 
 **Stack (depuis ARCHI)** — Electron (`contextIsolation` + `sandbox`) · electron-vite · React 19 + TypeScript strict · Tailwind CSS v4 + primitives Radix · Zustand · `@xterm/xterm` + addons fit/webgl (repli DOM) · `node-pty` (ConPTY, prebuilds N-API) · Zod · Vitest · electron-builder NSIS + electron-updater.
 
@@ -11,7 +11,7 @@
 Chaque tâche a été validée en exécutant l'app, pas en relisant le code : un harnais CDP pilote le build réel, exécute les assertions dans le contexte de page et capture une capture d'écran. Les artefacts sont dans `.agents/apex/runs/<run>/proof/`.
 
 - ✅ Implémenté et prouvé : les 19 tâches
-- Suite unitaire : 79 tests Vitest, verts, et **mutation-testés** (5 régressions injectées, 5 détectées)
+- Suite unitaire : 102 tests Vitest, verts, et **mutation-testés** (5 régressions injectées, 5 détectées lors du MVP)
 - Non fait délibérément : exécuter l'installeur NSIS (modifie le PATH et le menu Démarrer de l'utilisateur) et publier sur GitHub — hors périmètre sans accord explicite
 
 ## Consignes d'exécution

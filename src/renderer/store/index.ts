@@ -56,11 +56,20 @@ interface UiSlice {
   focusedPaneId: string | null
   zoomedPaneId: string | null
   editorOpen: boolean
+  /**
+   * Panes per line at the current width, measured by GridView.
+   *
+   * View state, never layout state: it is derived from the window and must
+   * never reach `.myterm.json` (ADR-003). It lives in the store only because
+   * arrow-key navigation has to know the shape the user is actually looking at.
+   */
+  columns: number
   setThemeMode: (mode: ThemeMode) => void
   setResolvedTheme: (theme: ResolvedThemeName) => void
   setFocusedPane: (paneId: string | null) => void
   toggleZoom: (paneId?: string) => void
   setEditorOpen: (open: boolean) => void
+  setColumns: (columns: number) => void
 }
 
 export type Store = WorkspaceSlice & RuntimeSlice & UiSlice
@@ -147,6 +156,7 @@ export const useStore = create<Store>()((set, get) => ({
   focusedPaneId: null,
   zoomedPaneId: null,
   editorOpen: false,
+  columns: 1,
 
   setThemeMode: (mode) => set({ themeMode: mode }),
   setResolvedTheme: (theme) => set({ resolvedTheme: theme }),
@@ -159,13 +169,16 @@ export const useStore = create<Store>()((set, get) => ({
   },
 
   setEditorOpen: (open) => set({ editorOpen: open }),
+
+  setColumns: (columns) =>
+    set((state) => (state.columns === columns ? state : { columns })),
 }))
 
 // ---- selectors -------------------------------------------------------------
 // Exported so components cannot accidentally subscribe to the whole store.
 
 export const selectPanes = (state: Store): Pane[] => state.layout.panes
-export const selectGrid = (state: Store): Layout['grid'] => state.layout.grid
+export const selectColumns = (state: Store): number => state.columns
 export const selectGeneration = (state: Store): number => state.generation
 
 export const selectPaneKey =

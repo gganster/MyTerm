@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { Pane } from '@shared/schema/layout'
+import { focusPane } from '../../pane-focus'
 import { createTerminal } from '../../terminal/create-terminal'
 import { disposeTerminal, getTerminal, registerTerminal } from '../../terminal/registry'
 import { selectIsFocused, selectIsHidden, useStore } from '../../store'
@@ -10,7 +11,7 @@ interface PaneViewProps {
 }
 
 /**
- * One cell of the grid: a header plus a live terminal.
+ * One pane: a header plus a live terminal.
  *
  * React owns the container element and nothing else. The xterm instance is
  * created here but lives in the module-level registry (ADR-006), and every
@@ -26,7 +27,6 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
   const isFocused = useStore(selectIsFocused(paneId))
   const isHidden = useStore(selectIsHidden(paneId))
   const isZoomed = useStore((state) => state.zoomedPaneId === paneId)
-  const setFocusedPane = useStore((state) => state.setFocusedPane)
   const setPaneStatus = useStore((state) => state.setPaneStatus)
 
   useEffect(() => {
@@ -126,25 +126,16 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
     return () => window.clearTimeout(id)
   }, [isHidden, paneId])
 
-  const focus = (): void => {
-    setFocusedPane(paneId)
-    getTerminal(paneId)?.terminal.focus()
-  }
-
   return (
     <section
       data-pane={paneId}
       data-focused={isFocused || undefined}
       data-zoomed={isZoomed || undefined}
-      onMouseDown={focus}
-      // Zooming re-positions the pane over the whole grid. Hidden siblings keep
-      // `display: none` rather than unmounting: unmounting would destroy their
-      // terminals and scrollback.
-      style={
-        isZoomed
-          ? { gridArea: '1 / 1 / -1 / -1' }
-          : { gridColumn: pane.col + 1, gridRow: pane.row + 1 }
-      }
+      onMouseDown={() => focusPane(paneId)}
+      // No explicit placement: panes flow in document order and the grid wraps
+      // them (ADR-003). Zoom is handled by GridView collapsing to one cell;
+      // hidden siblings keep `display: none` rather than unmounting, which
+      // would destroy their terminals and scrollback.
       className={[
         'flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-surface',
         isFocused ? 'border-accent' : 'border-border',

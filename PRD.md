@@ -50,22 +50,21 @@ MyTerm est un multiplexeur de terminaux desktop où chaque projet possède un fi
 
 #### 1. Workspace projet déclaratif (`.myterm.json`)
 
-**Description** : Chaque projet porte à sa racine un fichier `.myterm.json` décrivant sa grille : dimensions, et pour chaque pane son titre, sa position, son `cwd` (relatif à la racine du projet), son shell et sa commande d'autolaunch optionnelle. Le fichier est la source de vérité unique, éditable à la main, versionnable dans git. À l'ouverture d'un projet, MyTerm le lit, instancie la grille et exécute les commandes déclarées. Un pane sans commande démarre sur un shell vierge, en attente.
+**Description** : Chaque projet porte à sa racine un fichier `.myterm.json` décrivant ses panes, dans l'ordre : pour chacun son titre, son `cwd` (relatif à la racine du projet), son shell et sa commande d'autolaunch optionnelle. Aucune dimension, aucune coordonnée : la disposition est calculée à l'affichage (feature 2). Le fichier est la source de vérité unique, éditable à la main, versionnable dans git. À l'ouverture d'un projet, MyTerm le lit, instancie les panes et exécute les commandes déclarées. Un pane sans commande démarre sur un shell vierge, en attente.
 
 ```jsonc
 {
-  "version": 1,
+  "version": 2,
   "name": "mon-projet",
   "theme": "system",              // "light" | "dark" | "system"
-  "grid": { "cols": 3, "rows": 2 },
   "defaults": { "shell": "pwsh", "cwd": "." },
   "panes": [
-    { "id": "claude-1", "title": "Claude · feature", "col": 0, "row": 0, "command": "claude" },
-    { "id": "claude-2", "title": "Claude · review",  "col": 1, "row": 0, "command": "claude" },
-    { "id": "claude-3", "title": "Claude · libre",   "col": 2, "row": 0, "command": "claude" },
-    { "id": "web",  "title": "frontend", "col": 0, "row": 1, "cwd": "frontend", "command": "npm run dev" },
-    { "id": "api",  "title": "backend",  "col": 1, "row": 1, "cwd": "backend",  "command": "npm run dev" },
-    { "id": "free", "title": "scratch",  "col": 2, "row": 1 }
+    { "id": "claude-1", "title": "Claude · feature", "command": "claude" },
+    { "id": "claude-2", "title": "Claude · review",  "command": "claude" },
+    { "id": "claude-3", "title": "Claude · libre",   "command": "claude" },
+    { "id": "web",  "title": "frontend", "cwd": "frontend", "command": "npm run dev" },
+    { "id": "api",  "title": "backend",  "cwd": "backend",  "command": "npm run dev" },
+    { "id": "free", "title": "scratch" }
   ]
 }
 ```
@@ -73,16 +72,16 @@ MyTerm est un multiplexeur de terminaux desktop où chaque projet possède un fi
 **User Value** : le rituel de 2 minutes devient un clic, et le setup d'un projet se transmet avec le code.
 **Success Metric** : un projet à 6 panes est entièrement opérationnel en < 5 s après sélection ; le fichier suffit à reproduire le layout à l'identique sur une machine vierge.
 
-#### 2. Grille de terminaux N×M (le multiplexeur)
+#### 2. Grille de terminaux responsive (le multiplexeur)
 
-**Description** : Le cœur applicatif : une grille de terminaux PowerShell réels (PTY complet — couleurs, redimensionnement, saisie interactive, Ctrl+C), disposés en `cols × rows`. Chaque pane est indépendant, avec son propre process et son propre répertoire de travail. Le shell est PowerShell par défaut et surchargeable par pane (`cmd`, `git-bash`). Pas de rattachement à un daemon : fermer la fenêtre termine les process.
+**Description** : Le cœur applicatif : une grille de terminaux PowerShell réels (PTY complet — couleurs, redimensionnement, saisie interactive, Ctrl+C). Les panes se suivent dans l'ordre du fichier et se répartissent selon la largeur disponible — 3 par ligne au-delà de 1600 px, 2 au-delà de 1200 px, 1 en dessous — en passant à la ligne au-delà de cette capacité. La même déclaration reste donc utilisable en plein écran comme sur une fenêtre demi-écran, sans rien réécrire. Chaque pane est indépendant, avec son propre process et son propre répertoire de travail. Le shell est PowerShell par défaut et surchargeable par pane (`cmd`, `git-bash`). Pas de rattachement à un daemon : fermer la fenêtre termine les process.
 
 **User Value** : un vrai terminal, pas une émulation partielle — Claude Code et les serveurs de dev doivent tourner exactement comme dans Windows Terminal.
 **Success Metric** : `claude`, `npm run dev` et une session interactive (`git rebase -i`, prompts de confirmation) fonctionnent sans dégradation visible par rapport à Windows Terminal.
 
 #### 3. Éditeur de layout intégré
 
-**Description** : Ajouter, supprimer, renommer et repositionner un pane depuis l'interface ; modifier son `cwd`, son shell et sa commande d'autolaunch via un panneau de configuration ; changer les dimensions de la grille. Toute modification est écrite dans `.myterm.json`, et une édition externe du fichier est rechargeable depuis l'app.
+**Description** : Ajouter, supprimer, renommer et réordonner un pane depuis l'interface ; modifier son `cwd`, son shell et sa commande d'autolaunch via un panneau de configuration. Toute modification est écrite dans `.myterm.json`, et une édition externe du fichier est rechargeable depuis l'app.
 
 **User Value** : on construit son layout en travaillant, sans quitter l'app pour éditer du JSON ; le fichier reste néanmoins lisible pour les ajustements manuels.
 **Success Metric** : créer de zéro le layout à 6 panes de l'exemple ci-dessus sans jamais ouvrir d'éditeur de texte, en moins de 2 minutes.
@@ -105,7 +104,7 @@ MyTerm est un multiplexeur de terminaux desktop où chaque projet possède un fi
 
 - **Recherche dans le scrollback** (`Ctrl+F`) au sein d'un pane.
 - **Onglets de layouts** : plusieurs vues par projet (« Dev », « Debug »), chacune avec sa grille.
-- **Splits redimensionnables** en remplacement de la grille rigide, si la contrainte N×M devient limitante.
+- **Splits redimensionnables** en remplacement du flux automatique, si des panes de tailles inégales deviennent nécessaires.
 - **Support WSL** : cibler une distro dans la définition d'un pane.
 - **Portage macOS / Linux.**
 - **Templates de layouts** réutilisables entre projets (« Next.js + API »).
@@ -119,7 +118,7 @@ MyTerm est un multiplexeur de terminaux desktop où chaque projet possède un fi
 
 1. L'utilisateur lance MyTerm — écran d'accueil listant les projets récents — ou tape `myterm .` depuis le dossier du projet dans un terminal existant.
 2. Il clique sur le projet ; MyTerm lit le `.myterm.json` à sa racine.
-3. La grille 3×2 s'affiche : trois panes lancent `claude`, deux lancent `npm run dev` dans `frontend/` et `backend/`, le sixième attend sur un prompt vierge.
+3. Les six panes s'affichent, trois par ligne sur un écran complet : trois lancent `claude`, deux lancent `npm run dev` dans `frontend/` et `backend/`, le sixième attend sur un prompt vierge.
 4. Moins de 5 secondes après le clic, il tape son premier prompt dans le premier pane Claude.
 
 ### Parcours secondaire : créer le layout d'un nouveau projet
@@ -174,7 +173,7 @@ Explicitement non construit dans le MVP :
 Pas de deadline : projet personnel développé sur temps disponible. Le PRD fixe le cap, pas le calendrier. Jalons ordonnés :
 
 - **M1 — Le terminal fonctionne** : une fenêtre, un pane PowerShell PTY complet, thème light/dark.
-- **M2 — La grille** : N×M panes indépendants, zoom/focus, badges d'activité.
+- **M2 — La grille** : panes indépendants disposés automatiquement, zoom/focus, badges d'activité.
 - **M3 — Le fichier** : lecture de `.myterm.json`, autolaunch, `cwd` par pane, projets récents et CLI `myterm .`.
 - **M4 — L'édition** : éditeur de layout intégré, écriture du fichier, rechargement à chaud.
 - **M5 — Dogfooding** : 2 semaines d'usage exclusif, puis publication du repo sous licence MIT.

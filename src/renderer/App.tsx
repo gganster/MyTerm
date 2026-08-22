@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { GridView } from './components/Grid/GridView'
 import { LayoutEditor } from './components/LayoutEditor/LayoutEditor'
 import { ProjectPicker } from './components/ProjectPicker/ProjectPicker'
+import { StatusBar } from './components/StatusBar/StatusBar'
 import { ReloadBanner } from './components/ReloadBanner'
 import { UpdateBanner } from './components/UpdateBanner'
 import { ThemeToggle } from './components/ThemeToggle'
@@ -53,10 +54,14 @@ export function App(): React.JSX.Element {
   }, [workspace.open])
 
   const [update, setUpdate] = useState<{ version: string } | null>(null)
-  const runtime = useStore((state) => state.runtime)
   useEffect(() => window.myterm.app.onUpdateReady(setUpdate), [])
 
-  const hasLivePanes = Object.values(runtime).some((pane) => pane.status !== 'exited')
+  // A boolean, not the runtime record: subscribing to the record itself would
+  // re-render App — and with it the whole grid — on every status tick, several
+  // times a second (ARCHI § State Management).
+  const hasLivePanes = useStore((state) =>
+    Object.values(state.runtime).some((pane) => pane.status !== 'exited'),
+  )
   const updateBanner = update ? (
     <UpdateBanner
       version={update.version}
@@ -84,6 +89,7 @@ export function App(): React.JSX.Element {
           onPick={() => void workspace.pick()}
           onForget={(path) => void workspace.forget(path)}
         />
+        <StatusBar />
         {trust ? (
           <TrustDialog
             projectPath={trust.projectPath}
@@ -183,6 +189,8 @@ export function App(): React.JSX.Element {
           />
         ) : null}
       </div>
+
+      <StatusBar />
 
       {trust ? (
         <TrustDialog

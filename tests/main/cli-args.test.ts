@@ -68,4 +68,29 @@ describe('parseCliArgs', () => {
       error: null,
     })
   })
+
+  /**
+   * Racine de lecteur. La ligne de commande se termine par `"C:\"`, et
+   * CommandLineToArgvW lit `\"` comme un guillemet échappé : argv reçoit `C:"`.
+   * Mesuré sur la vraie API, pas déduit. Le menu contextuel de l’explorateur
+   * produit exactement cette ligne quand on clique dans le fond d’une fenêtre de
+   * lecteur, et `myterm C:\` aussi.
+   */
+  it('répare la racine de lecteur mutilée par CommandLineToArgvW', () => {
+    const result = parseCliArgs(['MyTerm.exe', 'C:"'], projectDir, true)
+    expect(result.projectPath?.toLowerCase()).toBe('c:\\')
+    expect(result.error).toBeNull()
+  })
+
+  it('répare aussi un autre lecteur, sans supposer C:', () => {
+    // Le lecteur n'existe pas ici : ce qui compte est que le chemin signalé soit
+    // « Z:\ », et non le « Z:" » résolu contre le dossier de l'appelant.
+    const result = parseCliArgs(['MyTerm.exe', 'Z:"'], projectDir, true)
+    expect(result.projectPath).toBeNull()
+    expect(result.error).toContain('Z:\\')
+  })
+
+  it('ne touche pas à un chemin normal', () => {
+    expect(parseCliArgs(['MyTerm.exe', projectDir], projectDir, true).projectPath).toBeTruthy()
+  })
 })

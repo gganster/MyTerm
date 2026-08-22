@@ -11,25 +11,29 @@ import { z } from 'zod'
 export const SHELLS = ['pwsh', 'powershell', 'cmd', 'bash'] as const
 export const THEME_MODES = ['light', 'dark', 'system'] as const
 
-export const LAYOUT_VERSION = 1
-export const MAX_COLS = 6
-export const MAX_ROWS = 4
+/**
+ * v2 dropped `grid` and the per-pane `{col, row}`: panes are now an ordered
+ * list laid out responsively (ADR-003). v1 files are migrated on read by
+ * `migrateLayout`, so bumping this does not orphan anyone's file.
+ */
+export const LAYOUT_VERSION = 2
+
+/**
+ * Kept at the old grid's cell count (6 x 4): a v1 file could not declare more
+ * panes than it had cells, so no valid v1 file hits this bound. It is a sanity
+ * limit, not a target — past a dozen panes each terminal is a few lines tall
+ * and the view scrolls.
+ */
+export const MAX_PANES = 24
 
 export const PaneSchema = z.object({
   id: z.string().min(1),
   title: z.string().default(''),
-  col: z.number().int().min(0),
-  row: z.number().int().min(0),
   /** Relative to the project root. Resolved and bounds-checked by resolveCwd(). */
   cwd: z.string().default('.'),
   shell: z.enum(SHELLS).optional(),
   /** Absent means a bare shell, waiting. Nothing is auto-executed. */
   command: z.string().optional(),
-})
-
-export const GridSchema = z.object({
-  cols: z.number().int().min(1).max(MAX_COLS),
-  rows: z.number().int().min(1).max(MAX_ROWS),
 })
 
 export const DefaultsSchema = z.object({
@@ -44,13 +48,19 @@ export const LayoutSchema = z
     version: z.literal(LAYOUT_VERSION),
     name: z.string().optional(),
     theme: z.enum(THEME_MODES).default('system'),
-    grid: GridSchema,
     defaults: DefaultsSchema.default({ shell: 'pwsh', cwd: '.' }),
-    panes: z.array(PaneSchema),
+    // Order is the layout: panes flow left to right, wrapping onto as many
+    // rows as the window width allows.
+    // `.min(1)` is stricter than v1, which tolerated an empty array and showed
+    // an empty window. An empty workspace is a state nothing else in the app
+    // can produce — removePane refuses it — so it is an error, not a view.
+    panes: z
+      .array(PaneSchema)
+      .min(1, 'un workspace doit déclarer au moins un pane')
+      .max(MAX_PANES, `un workspace ne peut pas dépasser ${MAX_PANES} panes`),
   })
   .superRefine((layout, ctx) => {
     const seenIds = new Set<string>()
-    const seenCells = new Map<string, string>()
 
     layout.panes.forEach((pane, index) => {
       if (seenIds.has(pane.id)) {
@@ -61,37 +71,10 @@ export const LayoutSchema = z
         })
       }
       seenIds.add(pane.id)
-
-      if (pane.col >= layout.grid.cols) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['panes', index, 'col'],
-          message: `doit être inférieur à grid.cols (${layout.grid.cols}), reçu ${pane.col}`,
-        })
-      }
-      if (pane.row >= layout.grid.rows) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['panes', index, 'row'],
-          message: `doit être inférieur à grid.rows (${layout.grid.rows}), reçu ${pane.row}`,
-        })
-      }
-
-      const cell = `${pane.col},${pane.row}`
-      const occupant = seenCells.get(cell)
-      if (occupant) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['panes', index],
-          message: `la cellule (${pane.col}, ${pane.row}) est déjà occupée par « ${occupant} »`,
-        })
-      }
-      seenCells.set(cell, pane.id)
     })
   })
 
 export type Pane = z.infer<typeof PaneSchema>
-export type Grid = z.infer<typeof GridSchema>
 export type Layout = z.infer<typeof LayoutSchema>
 export type Shell = (typeof SHELLS)[number]
 export type ThemeMode = (typeof THEME_MODES)[number]
@@ -102,9 +85,8 @@ export function defaultLayout(name?: string): Layout {
     version: LAYOUT_VERSION,
     ...(name ? { name } : {}),
     theme: 'system',
-    grid: { cols: 1, rows: 1 },
     defaults: { shell: 'pwsh', cwd: '.' },
-    panes: [{ id: 'pane-1', title: '', col: 0, row: 0, cwd: '.' }],
+    panes: [{ id: 'pane-1', title: '', cwd: '.' }],
   }
 }
 

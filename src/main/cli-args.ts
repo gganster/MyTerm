@@ -36,6 +36,32 @@ export function userArgsOf(argv: string[], isPackaged: boolean): string[] {
   return isPackaged ? positional.slice(1) : positional.slice(2)
 }
 
+/**
+ * Undoes the one way Windows hands us a path it has already broken.
+ *
+ * A command line ending `"C:\"` is not what it looks like. `CommandLineToArgvW`,
+ * which builds `process.argv`, reads `\"` as an escaped quote, so the argument
+ * becomes `C:"` and the quote is never closed. Measured, not deduced:
+ *
+ *   "…\MyTerm.exe" "C:\"   ->  argv[1] = C:"
+ *
+ * It only bites at a drive root, because only a drive root keeps its trailing
+ * backslash — and it is reachable: the Explorer context menu substitutes `%V`
+ * with `C:\` when you right-click the background of an open drive window, and a
+ * drive root's background does serve `Directory\Background\shell` verbs.
+ * `myterm C:\` from a terminal lands in exactly the same place.
+ *
+ * Left alone the failure is silent: `C:"` is not absolute, resolves against the
+ * caller's directory into nonsense, and the user gets the home screen.
+ *
+ * A trailing quote cannot occur any other way — `"` is not a legal character in
+ * a Windows path — so the repair cannot swallow a real argument.
+ */
+function repairDriveRoot(requested: string | undefined): string | undefined {
+  if (!requested || !requested.endsWith('"')) return requested
+  return `${requested.slice(0, -1)}\\`
+}
+
 export function parseCliArgs(
   argv: string[],
   workingDirectory: string,
@@ -43,7 +69,7 @@ export function parseCliArgs(
 ): CliRequest {
   const args = userArgsOf(argv, isPackaged)
   // Last wins: the project path is always the trailing argument.
-  const requested = args[args.length - 1]
+  const requested = repairDriveRoot(args[args.length - 1])
   if (!requested) return { projectPath: null, error: null }
 
   // `.` resolves against the *caller's* directory, not this process's cwd.

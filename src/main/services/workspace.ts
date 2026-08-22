@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { LayoutSchema, paneShell } from '@shared/schema/layout'
+import { LAYOUT_VERSION, LayoutSchema, paneShell } from '@shared/schema/layout'
 import type { Layout } from '@shared/schema/layout'
+import { legacyFieldIn, migrateLayout } from '@shared/schema/layout-migrate'
 import { formatZodError } from '@shared/schema/format-error'
 import type { LayoutReadFailure } from '@shared/schema/format-error'
 import { atomicWrite, serialiseJson } from '../util/atomic-write'
@@ -54,11 +55,20 @@ export async function readLayout(projectRoot: string): Promise<LayoutReadResult>
   // Checked before schema validation so a newer file gets a message about
   // versions rather than a wall of unrelated field errors.
   const version = (parsed as { version?: unknown })?.version
-  if (typeof version === 'number' && version > 1) {
+  if (typeof version === 'number' && version > LAYOUT_VERSION) {
     return { ok: false, failure: { kind: 'future-version', found: version } }
   }
 
-  const result = LayoutSchema.safeParse(parsed)
+  // A hand-bumped file: version 2, v1 coordinates still in it. Caught here
+  // rather than silently ignored, because ignoring it reorders the panes.
+  if (version === LAYOUT_VERSION) {
+    const legacy = legacyFieldIn(parsed)
+    if (legacy) return { ok: false, failure: { kind: 'legacy-fields', field: legacy } }
+  }
+
+  // An older file is upgraded in memory only. The upgraded shape reaches disk
+  // when — and only when — the user next saves an edit.
+  const result = LayoutSchema.safeParse(migrateLayout(parsed))
   if (!result.success) {
     return { ok: false, failure: { kind: 'invalid', problems: formatZodError(result.error) } }
   }

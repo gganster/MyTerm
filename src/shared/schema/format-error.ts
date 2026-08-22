@@ -22,6 +22,7 @@ export type LayoutReadFailure =
   | { kind: 'unreadable'; detail: string }
   | { kind: 'malformed-json'; detail: string }
   | { kind: 'future-version'; found: unknown }
+  | { kind: 'legacy-fields'; field: string }
   | { kind: 'invalid'; problems: string[] }
 
 export function describeFailure(failure: LayoutReadFailure): string {
@@ -36,6 +37,13 @@ export function describeFailure(failure: LayoutReadFailure): string {
       return `.myterm.json n'est pas du JSON valide : ${failure.detail}`
     case 'future-version':
       return `.myterm.json déclare la version ${String(failure.found)} : il a été créé par une version plus récente de MyTerm (cette version lit la ${LAYOUT_VERSION})`
+    case 'legacy-fields':
+      return (
+        `.myterm.json déclare la version ${LAYOUT_VERSION} mais contient encore « ${failure.field} » : ` +
+        "la disposition n'est plus décrite dans le fichier, l'ordre des panes suffit.\n" +
+        '  · soit vous supprimez « grid » et les « col »/« row » — les panes seront alors affichés dans leur ordre de déclaration ;\n' +
+        '  · soit vous remettez "version": 1 et MyTerm convertit le fichier lui-même, en respectant la disposition actuelle.'
+      )
     case 'invalid':
       return `.myterm.json est invalide :\n${failure.problems.map((p) => `  · ${p}`).join('\n')}`
   }

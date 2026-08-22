@@ -25,7 +25,11 @@ export function useAutosave(): {
   latest.current = layout
 
   const saveNow = useCallback(async () => {
-    if (!useStore.getState().projectPath) return
+    const state = useStore.getState()
+    // Nothing to write is not the same as writing the same thing: an untouched
+    // v1 file would be silently reserialised as v2, breaking it for a teammate
+    // on an older build. A save with no edit behind it is a no-op.
+    if (!state.projectPath || !state.dirty) return
     const result = await window.myterm.workspace.save(latest.current)
     if (result.ok) {
       setSaveError(null)

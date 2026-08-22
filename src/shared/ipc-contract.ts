@@ -1,4 +1,6 @@
 import type { PaneStatus } from './pane-status'
+import type { QuotaWindow } from './quota'
+import type { SystemLoad } from './system-load'
 
 /**
  * The single declaration of the process boundary. Both sides import from here,
@@ -26,6 +28,8 @@ export const IPC = {
   prefsSet: 'prefs:set',
   themeResolve: 'theme:resolve',
   themeSet: 'theme:set',
+  statusUsageGet: 'status:usage-get',
+  statusLoadGet: 'status:load-get',
 
   // main -> renderer (send, pushed streams)
   paneData: 'pane:data',
@@ -38,6 +42,8 @@ export const IPC = {
   appOpenProject: 'app:open-project',
   appUpdateReady: 'app:update-ready',
   appInstallUpdate: 'app:install-update',
+  statusUsage: 'status:usage',
+  statusLoad: 'status:load',
 } as const
 
 export type ThemeMode = 'light' | 'dark' | 'system'
@@ -115,6 +121,37 @@ export type OpenWorkspaceResult =
   | { status: 'error'; projectPath: string; message: string }
 
 export type TrustDecision = 'approve' | 'open-without-executing' | 'cancel'
+
+/**
+ * Claude quota as pushed to the status bar.
+ *
+ * Note what is *not* here: no token, no account identifier, no file path. The
+ * OAuth credential is read in the main process and never leaves it; a failure
+ * is reduced to the coarse `error` code below, because this payload reaches the
+ * renderer and, through it, anything the renderer logs.
+ */
+export interface UsageSnapshot {
+  ok: boolean
+  /**
+   * The reading is real but the last poll failed, so it is older than
+   * `fetchedAt` suggests it should be. `ok` stays true: showing a slightly old
+   * quota beats blanking the bar on one dropped request.
+   */
+  stale: boolean
+  /** When the values it carries were actually measured. */
+  fetchedAt: number
+  fiveHour: QuotaWindow
+  sevenDay: QuotaWindow
+  /**
+   * Coarse reason for the last failure — `no-credentials`, `token-expired`,
+   * `http-401`, `http-429`, `network`, `parse`… Never a message built from file
+   * content. Present alongside `ok: true` when the snapshot is stale.
+   */
+  error?: string
+}
+
+/** Payload of `status:load`. Declared in `./system-load` next to the arithmetic that produces it. */
+export type { SystemLoad }
 
 export type SaveLayoutResult =
   | { ok: true; warnings: { paneId: string; message: string }[] }

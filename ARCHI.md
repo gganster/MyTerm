@@ -88,9 +88,9 @@ Trois principes gouvernent toutes les décisions ci-dessous.
 **Zustand — un store unique, découpé en slices**
 
 ```
-workspaceSlice   projectPath, layout (grid + panes), dirty
+workspaceSlice   projectPath, layout (panes ordonnés), dirty
 runtimeSlice     Map<paneId, { status, exitCode, pid }>
-uiSlice          focusedPaneId, zoomedPaneId, theme, editorOpen
+uiSlice          focusedPaneId, zoomedPaneId, theme, editorOpen, columns
 ```
 
 - *Pourquoi* : les badges d'activité changent plusieurs fois par seconde sur 6 panes. Avec Context + useReducer, chaque changement re-rend tout l'arbre sous le provider ; avec Zustand, un `PaneBadge` s'abonne à `state.runtime.get(id).status` via un sélecteur et lui seul se re-rend.
@@ -141,6 +141,8 @@ pane:resize(paneId, c, r)   → void
 pane:kill(paneId)           → void
 prefs:get() / prefs:set(p)  → Preferences
 theme:resolve()             → 'light' | 'dark'
+status:usage-get()          → UsageSnapshot   // dernier quota connu
+status:load-get()           → SystemLoad      // dernier échantillon CPU/RAM
 ```
 
 **Main → Renderer** — `webContents.send`, flux poussé :
@@ -151,7 +153,11 @@ pane:status(paneId, status)       // running | attention | idle | exited
 pane:exit(paneId, code)
 workspace:changed-on-disk()       // .myterm.json édité à l'extérieur
 theme:system-changed(mode)
+status:usage(snapshot)            // quota Claude, poussé à chaque sondage
+status:load(sample)               // CPU/RAM, poussé toutes les 2 s
 ```
+
+Les deux canaux `status:*` sont doublés d'un `*-get` : le renderer monte bien après le démarrage du main, et un push émis avant l'attachement du listener laisserait la barre bloquée sur « — ».
 
 ### Le batching de sortie (le point chaud)
 
@@ -186,26 +192,22 @@ Zod définit le schéma, TypeScript en dérive le type (`z.infer`) — un seul e
 const PaneSchema = z.object({
   id:      z.string().min(1),
   title:   z.string().default(''),
-  col:     z.number().int().min(0),
-  row:     z.number().int().min(0),
   cwd:     z.string().default('.'),          // relatif à la racine du projet
   shell:   z.enum(['pwsh','powershell','cmd','bash']).optional(),
   command: z.string().optional(),            // absent = shell nu, en attente
 })
 
 const LayoutSchema = z.object({
-  version:  z.literal(1),
+  version:  z.literal(2),
   name:     z.string().optional(),
   theme:    z.enum(['light','dark','system']).default('system'),
-  grid:     z.object({ cols: z.number().int().min(1).max(6),
-                       rows: z.number().int().min(1).max(4) }),
   defaults: z.object({ shell: z.string().default('pwsh'),
                        cwd:   z.string().default('.') }).default({}),
-  panes:    z.array(PaneSchema),
-}).superRefine(/* ids uniques, positions dans la grille, pas de collision */)
+  panes:    z.array(PaneSchema).min(1).max(24),   // l'ordre EST la disposition
+}).superRefine(/* ids uniques */)
 ```
 
-- **`version: 1` littéral** : un fichier d'une version future est rejeté avec un message clair plutôt que partiellement interprété. Le jour où un `version: 2` arrive, une fonction de migration explicite `v1 → v2` s'insère avant la validation.
+- **`version: 2` littéral** : un fichier d'une version future est rejeté avec un message clair plutôt que partiellement interprété. Un fichier v1 (grille `cols × rows`, panes en `{col, row}`) est migré en mémoire par `migrateLayout` avant la validation — les panes sont aplatis dans le sens de lecture, ligne par ligne. La migration ne réécrit rien : le fichier sur le disque ne passe en v2 qu'à la première sauvegarde de l'utilisateur.
 - **Fichier invalide** : jamais d'échec silencieux ni de réécriture automatique. L'app affiche l'erreur Zod formatée avec le chemin du champ fautif, et propose « ouvrir un pane unique » ou « corriger le fichier ». Un fichier commité ne doit jamais être écrasé par l'app à cause d'une erreur de parsing.
 - **Écriture atomique** : écriture dans `.myterm.json.tmp` puis `fs.rename`. Une coupure pendant la sauvegarde ne peut pas laisser un fichier tronqué dans le repo de l'utilisateur.
 - **Édition externe** : `fs.watch` sur le fichier ; une modification externe n'est jamais appliquée automatiquement (elle tuerait des process en cours) — elle lève une bannière « le fichier a changé sur le disque · Recharger ».
@@ -223,6 +225,24 @@ L'app exécute des commandes arbitraires décrites dans un fichier **commité da
 
 3. **`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.** Le preload n'utilise que `contextBridge` + `ipcRenderer`, tous deux disponibles en sandbox ; aucun module Node n'a besoin d'être chargé côté renderer.
 4. **Aucun contenu distant.** Le renderer ne charge que des fichiers locaux, `webSecurity` reste activé, et `will-navigate` / `setWindowOpenHandler` sont bloqués.
+5. **Une seule sortie réseau authentifiée, confinée au main.** La barre de statut lit le quota Claude sur l'endpoint OAuth d'usage. Le jeton est lu depuis le fichier de credentials de Claude Code, posé dans un unique en-tête `Authorization`, puis oublié : il ne franchit jamais l'IPC, n'apparaît dans aucun log, et les échecs sont réduits à des codes grossiers (`no-credentials`, `token-expired`, `http-429`, `network`) — jamais un message d'exception, qui embarquerait le chemin absolu du fichier. Le point 4 reste vrai : c'est le main qui parle au réseau, le renderer ne charge toujours que du local.
+
+
+### La barre de statut
+
+Un pied de fenêtre permanent, présent dans les deux vues (sélecteur de projet et workspace) : quota Claude à gauche, charge machine à droite. Trois décisions le gouvernent.
+
+**Le quota vient d'une seule source.** L'endpoint OAuth live, celui que `/usage` affiche. `claude-usage-overlay` y ajoute deux replis sur les fichiers de cache de la statusline personnelle de son auteur ; ces chemins n'existent que sur une machine, ils seraient du code mort pour tout autre utilisateur de MyTerm.
+
+**Le sondage est bridé, parce que l'endpoint est partagé.** La statusline de Claude Code et tout overlay d'usage tapent le même endpoint avec le même compte, et il répond 429 quand la somme dépasse son budget — constaté pendant la preuve runtime de cette feature. D'où un intervalle de base de 2 minutes (un pourcentage de quota ne bouge pas de plus de quelques points en deux minutes), un backoff exponentiel plafonné à 15 minutes, et un recul immédiat de 5 minutes sur le premier 429. Un `setTimeout` qui se replanifie, pas un `setInterval` : un intervalle ne sait pas ralentir.
+
+**Un échec ne vide pas la barre.** Tant que la dernière mesure réussie a moins de 15 minutes, elle reste affichée avec un `⋯` discret et l'explication en infobulle. Une barre qui clignote vers « indisponible » à chaque hoquet de Wi-Fi est une barre qu'on cesse de lire ; au-delà de 15 minutes, elle avoue ne pas savoir plutôt que de mentir.
+
+Deux règles d'affichage, corollaires du PRD : une valeur inconnue vaut `—`, **jamais** `0 %` (un quota à zéro se lit « intact », soit l'inverse de « on ne sait pas »), et la couleur ne sert qu'à alerter — en dessous de 75 % la jauge est grise, sinon une barre en permanence verte apprendrait à l'œil à sauter la ligne, y compris quand elle passe au rouge.
+
+Le CPU et la RAM viennent d'`os.cpus()` et `os.totalmem()`, échantillonnés toutes les 2 s dans le main. Aucune dépendance ajoutée. La charge CPU n'existe qu'en delta entre deux relevés — d'où un échantillonneur avec état côté main, et de l'arithmétique pure dans `@shared/system-load`, testable sans machine chargée.
+
+Enfin, `useStatus()` n'est appelé que par `StatusBar`, jamais par `App`. Le remonter d'un cran re-rendrait toute la grille toutes les 2 s pour un pied de page que personne ne regarde — exactement le mode d'échec décrit en § State Management. Et rien dans la barre n'est cliquable : un contrôle en pied de fenêtre volerait le focus du terminal.
 
 ### Persistance globale
 
@@ -246,6 +266,30 @@ Pas de `electron-store` : une lecture, des écritures débouncées, le même hel
 - Le shim résout le chemin absolu du dossier courant et lance l'exécutable avec ce chemin en argument.
 - Côté app : `app.requestSingleInstanceLock()`. Une seconde invocation ne démarre pas un second Electron — elle transmet son `argv` à l'instance existante via l'événement `second-instance`, qui ouvre le projet et met la fenêtre au premier plan.
 - Le `argv` est traité comme une entrée non fiable : on vérifie que le chemin existe et qu'il s'agit d'un dossier avant toute chose.
+
+### Le menu contextuel de l'explorateur
+
+Troisième porte d'entrée, et la plus courte : un clic droit dans le dossier du projet plutôt qu'un terminal à ouvrir d'abord. L'installeur écrit deux verbes, dans `HKCU\Software\Classes` comme le reste de l'installation par utilisateur :
+
+| Clé | Menu | Libellé |
+|---|---|---|
+| `Directory\shell\MyTerm` | clic droit **sur** un dossier | *Ouvrir dans MyTerm* |
+| `Directory\Background\shell\MyTerm` | clic droit **dans le vide** d'un dossier ouvert | *Ouvrir MyTerm ici* |
+
+Trois points qui ne s'improvisent pas :
+
+- La commande est `"$INSTDIR\MyTerm.exe" "%V"`. **`%V`, pas `%1`** : le menu du fond de dossier n'a aucun élément cliqué à substituer, `%1` y est vide et MyTerm s'ouvrirait sur l'écran d'accueil — un échec silencieux, puisque l'entrée apparaît et lance bien l'application.
+- `MultiSelectModel = Single` sur le verbe du dossier. Sans cet attribut, un verbe en ligne de commande est invoqué **une fois par élément sélectionné** : six dossiers sélectionnés démarrent six `MyTerm.exe`, dont cinq perdent le verrou d'instance unique et poussent tour à tour leur projet dans la même fenêtre.
+- Elle vise l'exécutable, pas `myterm.cmd` : un `.cmd` ferait clignoter une console à chaque lancement, et le shim n'existe que pour *retrouver* le dossier d'installation depuis un terminal.
+- Elle n'ouvre aucun chemin de code nouveau : le dossier arrive dans `argv` et repart dans `parseCliArgs`, donc verrou d'instance unique, validation et **contrôle de confiance** s'appliquent à l'identique. Trois portes d'entrée, une seule implémentation (ADR-004).
+
+**Racine de lecteur.** `%V` conserve l'antislash final : la ligne de commande se termine par `"C:\"`, et `CommandLineToArgvW` — celui qui construit `process.argv` — lit `\"` comme un guillemet échappé. L'argument reçu est `C:"`, ni absolu ni existant, et l'utilisateur retombe sur l'écran d'accueil sans un mot. Le fond d'une fenêtre de lecteur sert bien les verbes `Directory\Background\shell`, le cas est donc atteignable ; `myterm C:\` depuis un terminal y tombe aussi. La réparation est dans `cli-args.ts`, côté application : un `"` final ne peut pas venir d'autre part, ce caractère étant illégal dans un chemin Windows.
+
+**La désinstallation pendant une mise à jour est sautée** (`${ifNot} ${isUpdated}`). electron-builder lance l'ancien désinstalleur *avant* de copier les nouveaux fichiers ; si la copie échoue, le modèle restaure les fichiers et abandonne — `customInstall` ne s'exécute jamais. Sans ce garde-fou, l'utilisateur se retrouve avec une application qui marche mais qui a perdu son `PATH`, son shim et ses deux verbes, sans aucun message.
+
+**Windows 11 place ce verbe derrière « Afficher plus d'options »** (le menu hérité, aussi accessible par `Maj+F10`). Le menu compact n'accepte que les extensions `IExplorerCommand` déclarées via une **identité de paquet signée** — MSIX complet ou paquet *sparse*. Pour une application non signée et installée par utilisateur, le coût dépasse largement le gain. C'est une limite assumée, pas un oubli.
+
+Non enregistrés, délibérément : `Drive\shell` (l'icône d'un lecteur dans « Ce PC » — le *fond* d'une fenêtre de lecteur, lui, est couvert), `DesktopBackground\Shell` et `LibraryFolder`. Ouvrir un lecteur entier comme projet n'a pas de sens. Pas de `SHChangeNotify` non plus : les verbes statiques sont relus à la construction du menu, ce qui a été vérifié — une entrée fraîchement écrite apparaît dans la session en cours, sans redémarrage.
 
 ---
 
@@ -279,7 +323,7 @@ Corollaires à ne pas rater :
 ### electron-builder
 
 - Cible unique **NSIS x64** (Windows 11 uniquement, cf. PRD).
-- `extraResources` pour le shim CLI, script NSIS personnalisé pour la modification du `PATH` utilisateur à l'install et son retrait à la désinstallation.
+- `extraResources` pour le shim CLI, script NSIS personnalisé pour la modification du `PATH` utilisateur et l'enregistrement des verbes du menu contextuel à l'install, leur retrait à la désinstallation.
 - **Signature de code** : sans certificat, SmartScreen affiche un avertissement à chaque installation. Tolérable pour un usage personnel, bloquant à la publication open-source (voir la section coûts).
 
 ### electron-updater
@@ -287,6 +331,37 @@ Corollaires à ne pas rater :
 Publication via GitHub Releases sur un dépôt public. `checkForUpdatesAndNotify` au démarrage, téléchargement en arrière-plan, application au redémarrage. Deux réserves :
 - Une mise à jour ne doit **jamais** s'appliquer pendant qu'un pane tourne — l'installation est proposée, jamais forcée.
 - Sans signature, l'auto-update fonctionne mais chaque mise à jour hérite du même avertissement SmartScreen.
+
+### Intégration continue
+
+Deux workflows, `.github/workflows/` :
+
+| Workflow | Déclencheur | Rôle |
+|---|---|---|
+| `ci.yml` | PR, push hors branche par défaut | build, tests, **et packaging de l'installeur** |
+| `release.yml` | push sur `main`, dispatch | build, tests, packaging, publication conditionnelle |
+
+Les deux tournent sur `windows-latest` : ce qui casse ici, ce sont `node-pty` et les chemins Windows, les tester sur Linux ne prouverait rien. `ci.yml` package l'installeur en plus des tests parce que la chaîne electron-vite → electron-builder échoue sur des choses qu'aucun test unitaire ne voit — `asarUnpack`, `extraResources`, le script NSIS.
+
+`release.yml` ne se déclenche pas sur les tags. Le `package.json` est la seule source de vérité sur la version : un tag `v0.2.0` poussé sur un arbre où `package.json` dit `0.1.0` ferait tourner un build Windows complet pour conclure que `0.1.0` est déjà publiée.
+
+Les deux jobs lancent `npm run build` **avant** electron-builder. Ce n'est pas une vérification redondante avec les tests : `out/` est gitignoré et n'est produit que par `electron-vite build`. Sans cette étape, le `files: out/**` d'electron-builder ne matche rien et le packaging s'arrête sur « Application entry file app.asar does not exist » — un pipeline qui ne publie jamais rien.
+
+**Le point de conception de `release.yml`** est son étape `Gate`. `electron-builder --publish always` n'échoue pas devant une release déjà existante : `getOrCreateRelease` la réutilise — et en écrase les assets — si elle a moins de deux heures, et abandonne avec un simple warning au-delà. Publier à chaque push sans condition donnerait donc, selon l'heure, soit l'écrasement silencieux d'un installeur déjà distribué, soit un run vert qui n'a rien publié. Et côté client, electron-updater ne compare que des semver : republier la même version ne déclenche aucune mise à jour.
+
+La règle est donc : **on publie si et seulement si `v<version>` n'a pas encore de release publiée**. Un push sur `main` publie quand le `version` du `package.json` a été incrémenté, et à ce moment-là seulement. Le job devient idempotent — un re-run ne peut ni dupliquer ni corrompre une release.
+
+Cette règle seule ouvrirait pourtant un piège : un run qui échoue *après* la création de la release laisserait une release vide, que le garde-fou refuserait ensuite de reprendre. D'où le passage par un brouillon (`releaseType: draft`), qui est aussi le workflow recommandé par electron-builder : la CI crée la release en brouillon, téléverse, puis la promeut (`gh release edit --draft=false --latest`). Un brouillon est exclu de `/releases/latest`, donc aucun client ne voit jamais une release à moitié téléversée ; et comme `getOrCreateRelease` réutilise un brouillon existant, un run interrompu est repris par le suivant au lieu de bloquer la version. Le `Gate` traite donc « brouillon » comme « pas encore publié », jamais comme « déjà fait ».
+
+`latest.yml` est téléversé au même titre que le `.exe` : c'est le fichier que l'app interroge. Une release qui n'en contient pas est installable à la main et invisible pour l'updater. L'étape de promotion le vérifie donc explicitement avant de rendre la release publique — et elle exige que l'asset soit en état `uploaded`, un téléversement interrompu laissant un asset qui porte son nom sans être téléchargeable. Les chemins d'upload d'electron-builder sortent en code 0 quand ils renoncent : sans ce contrôle, un run vert pourrait marquer « latest » une release vide.
+
+Le garde-fou refuse aussi une version qui ne serait pas strictement supérieure à la plus haute déjà publiée. `make_latest` est posé sans condition à la promotion : publier une version inférieure — un revert du champ `version`, un correctif poussé depuis une branche de maintenance — ferait pointer `/releases/latest` sur l'ancienne release, et tout le parc cesserait silencieusement de voir des mises à jour. Le champ `version` est enfin validé contre un `X.Y.Z` strict avant tout usage — faute de quoi une valeur absente produirait une release `vundefined`. Les préversions sont refusées : rien ici ne définit de canal de préversion et la promotion pose `make_latest`, si bien qu'un `1.0.0-beta.1` publié partirait vers tout le parc. Les refuser supprime au passage toute comparaison d'ordre entre préversions, dont les règles sont un nid à bugs — comparer `beta.10` et `beta.9` comme des chaînes donne la mauvaise réponse.
+
+`make_latest` est recalculé au moment de la promotion, pas repris du garde-fou : cinq minutes de build les séparent, et si une version supérieure a été publiée entre-temps, la release est quand même publiée mais sans être marquée « latest ».
+
+Deux limites connues, sans effet à l'échelle actuelle. La pagination du garde-fou (100 par page) est plus large que celle d'`getOrCreateRelease`, qui ne lit que la première page de `/releases` : passé une trentaine de releases, le garde-fou peut voir un brouillon qu'electron-builder ne verra pas, et « reprendre le brouillon » deviendrait « en créer un second avec le même tag ». Et GitHub ne conserve qu'un seul run en attente par groupe de concurrence : trois incréments de version en moins d'un build verraient celui du milieu annulé, à rejouer via `workflow_dispatch`.
+
+Le `publish` de `electron-builder.yml` (`owner: gganster`, `repo: myterm`) est aussi la source de l'`app-update.yml` embarqué dans le paquet : il désigne le dépôt interrogé par l'app installée, pas seulement la cible du téléversement. Le déplacer sans le mettre à jour couperait les mises à jour de toutes les versions déjà installées.
 
 ### Tests
 
@@ -328,13 +403,13 @@ Pas de Playwright au MVP : le rapport coût/valeur d'un E2E Electron est mauvais
 
 Cela laissait craindre que les processus enfants (le `node.exe` derrière un `npm run dev`) survivent à la fermeture d'un pane. **Mesure faite sur trois stratégies — `pty.kill()` seul, `pty.kill()` + `taskkill /T /F`, et `useConptyDll` — les trois tuent l'enfant.** La destruction du pseudoconsole ConPTY suffit à terminer l'arbre attaché. Retenu : `useConpty: true` + `pty.kill()` simple, sans `taskkill`. L'erreur `AttachConsole` est du bruit cosmétique sur stderr d'un process transitoire, invisible dans l'application packagée.
 
-### ADR-003 — Grille N×M rigide plutôt qu'un arbre de splits
+### ADR-003 — Flux responsive plutôt qu'une grille N×M déclarée
 
-- **Contexte** : le PRD choisit une grille `cols × rows`, chaque pane occupant une cellule.
-- **Décision** : positions absolues `{col, row}` dans le JSON, rendu en CSS Grid natif.
-- **Alternatives** : arbre binaire de splits avec ratios (modèle tmux/VS Code).
-- **Rationale** : un arbre de splits impose un modèle récursif, une sérialisation imbriquée, une logique de redimensionnement en cascade et une UX de drag-and-drop de séparateurs — plusieurs jours de travail pour un besoin qui n'est pas exprimé. CSS Grid rend la grille en une ligne de style, et le JSON reste lisible et éditable à la main, ce qui est un objectif du PRD.
-- **Conséquences** : pas de panes de tailles inégales. Si la contrainte devient gênante, la migration vers un modèle de splits est un changement de schéma (`version: 2`) avec migration automatique v1 → v2 — d'où le champ `version` dès maintenant.
+- **Contexte** : la v1 déclarait une grille `cols × rows` et une position absolue `{col, row}` par pane. À l'usage, deux choses ont fait céder ce modèle : décrire une grille à la main pour six panes est laborieux, et surtout une grille figée ne survit pas au redimensionnement — un layout 3×2 confortable en plein écran devient six colonnes de trente caractères sur une fenêtre demi-écran.
+- **Décision** : le fichier ne décrit plus que *quels* panes existent et dans quel ordre. Le nombre de panes par ligne est une fonction de la largeur disponible : `> 1600 px → 3`, `> 1200 px → 2`, sinon `1`, jamais plus que le nombre de panes. Les panes en excédent passent à la ligne suivante ; les lignes gardent une hauteur minimale de 200 px et la zone défile plutôt que d'écraser tous les terminaux.
+- **Alternatives** : garder la grille déclarée avec un mode responsive optionnel (deux modèles à maintenir, et le fichier reste pénible à écrire) ; arbre de splits redimensionnables façon tmux (sérialisation imbriquée, redimensionnement en cascade, drag de séparateurs — plusieurs jours pour un besoin non exprimé).
+- **Rationale** : la largeur est une propriété de la fenêtre, pas du projet. La mettre dans un fichier commité, c'est demander à l'utilisateur de la maintenir à la main à chaque changement d'écran. Le format y gagne aussi : un pane se décrit en une ligne, et l'ordre est la seule chose à comprendre pour éditer le fichier à la main — ce qui reste un objectif du PRD.
+- **Conséquences** : pas de panes de tailles inégales, ni de disposition figée reproductible au pixel près. La largeur est mesurée sur la *zone de panes* et non sur la fenêtre, pour que l'ouverture de l'éditeur de layout (320 px) refasse couler les panes comme le ferait une fenêtre plus étroite. La mesure se fait sur la border-box : mesurer la content-box laisserait une barre de défilement apparue à un seuil retirer une colonne, ce qui ferait disparaître la barre, ce qui remettrait la colonne. Le schéma passe en `version: 2` avec migration automatique v1 → v2 — c'est exactement le cas prévu par le champ `version`.
 
 ### ADR-004 — Trust prompt sur les projets inconnus
 
@@ -372,7 +447,7 @@ MyTerm/
 ├── electron-builder.yml
 ├── package.json
 ├── build/
-│   ├── installer.nsh            # PATH utilisateur + shim CLI
+│   ├── installer.nsh            # PATH utilisateur + shim CLI + menu contextuel
 │   └── icon.ico
 ├── resources/
 │   └── myterm.cmd               # shim CLI
@@ -391,6 +466,8 @@ MyTerm/
     │   │   ├── pty-manager.ts
     │   │   ├── output-batcher.ts
     │   │   ├── preferences.ts
+    │   │   ├── usage.ts         # quota Claude — seul endroit qui voit le jeton
+    │   │   ├── load-monitor.ts  # échantillonnage CPU/RAM
     │   │   └── trust.ts
     │   ├── ipc/handlers.ts
     │   └── util/atomic-write.ts
@@ -446,7 +523,7 @@ Aligné sur les jalons M1–M5 du PRD.
 4. `src/shared/palette.ts`, thème light/dark/system, `nativeTheme` relayé, réassignation du `ITheme` sur changement.
 
 ### Phase 2 — La grille (M2)
-5. CSS Grid `cols × rows`, `TerminalRegistry`, dispose propre au démontage.
+5. CSS Grid, `TerminalRegistry`, dispose propre au démontage. *(La grille `cols × rows` de cette étape a été remplacée depuis par le flux responsive d'ADR-003.)*
 6. `OutputBatcher` avec flush 16 ms et contre-pression.
 7. Machine d'état des panes (BEL → `attention`), badges, focus clavier, zoom plein écran.
 8. Fallback canvas sur perte de contexte WebGL.
@@ -465,7 +542,7 @@ Aligné sur les jalons M1–M5 du PRD.
 ### Phase 5 — Distribution (M5)
 16. Suite Vitest sur la logique pure.
 17. electron-builder NSIS, `asarUnpack` de node-pty, script NSIS de `PATH`, icône.
-18. electron-updater + GitHub Releases, workflow CI de release.
+18. electron-updater + GitHub Releases, workflows CI (`ci.yml`) et release conditionnelle (`release.yml`).
 19. Deux semaines de dogfooding exclusif, puis publication MIT — et revalidation de l'heuristique BEL sur usage réel.
 
 ---

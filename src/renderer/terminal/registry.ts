@@ -46,6 +46,21 @@ export function terminalCount(): number {
 }
 
 /**
+ * Repaint every terminal.
+ *
+ * Reordering panes moves live <section> nodes, and React reconciles that as a
+ * remove + insert: the WebGL canvas is detached and re-attached, and since it
+ * is created with `preserveDrawingBuffer: false` its contents are gone. Nothing
+ * else would repaint it until the next byte of output or the next resize, and a
+ * pane sitting idle at a prompt produces neither.
+ */
+export function refreshTerminals(): void {
+  for (const handle of terminals.values()) {
+    handle.terminal.refresh(0, handle.terminal.rows - 1)
+  }
+}
+
+/**
  * Debug hook. With the WebGL renderer the terminal contents are painted to a
  * canvas and are absent from the DOM, so there is no other way to assert on
  * what a pane actually shows — from devtools or from an automated check.

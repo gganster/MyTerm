@@ -8,7 +8,13 @@ import type {
   ResolvedTheme,
   ThemeMode,
 } from '@shared/ipc-contract'
-import type { OpenWorkspaceResult, SaveLayoutResult, TrustDecision } from '@shared/ipc-contract'
+import type {
+  OpenWorkspaceResult,
+  SaveLayoutResult,
+  TrustDecision,
+  UsageSnapshot,
+} from '@shared/ipc-contract'
+import type { SystemLoad } from '@shared/system-load'
 import type { Preferences } from '@shared/schema/preferences'
 import {
   closeWorkspace,
@@ -28,7 +34,9 @@ import {
 import { OutputBatcher } from '../services/output-batcher'
 import { PaneStatusTracker } from '../services/pane-status-machine'
 import { PtyManager } from '../services/pty-manager'
+import { disposeLoadMonitor, getSystemLoad, initLoadMonitor } from '../services/load-monitor'
 import { disposeUpdater, initUpdater, installUpdate } from '../services/updater'
+import { disposeUsagePolling, getUsage, initUsagePolling } from '../services/usage'
 import { workspaceState } from '../services/workspace-state'
 import { isInsideRoot } from '../util/resolve-cwd'
 import { getMainWindow } from '../window'
@@ -214,6 +222,17 @@ export function registerIpcHandlers(): void {
     installUpdate({ force, hasLivePanes }),
   )
 
+  // ---- status bar ----------------------------------------------------------
+
+  // Both are push streams with a pull companion: the renderer mounts long after
+  // the main process starts, and a push emitted before its listener attached
+  // would leave the bar stuck on "—" until the next tick.
+  initUsagePolling((snapshot) => push(IPC.statusUsage, snapshot))
+  initLoadMonitor((load) => push(IPC.statusLoad, load))
+
+  ipcMain.handle(IPC.statusUsageGet, (): UsageSnapshot => getUsage())
+  ipcMain.handle(IPC.statusLoadGet, (): SystemLoad => getSystemLoad())
+
   // ---- preferences ---------------------------------------------------------
 
   ipcMain.handle(IPC.prefsGet, (): Preferences => getPreferencesForRenderer())
@@ -241,6 +260,8 @@ export function registerIpcHandlers(): void {
 /** A leaked pty leaves an orphan shell behind after the window is gone. */
 export function disposeIpc(): void {
   disposeUpdater()
+  disposeUsagePolling()
+  disposeLoadMonitor()
   if (idleTimer) clearInterval(idleTimer)
   idleTimer = null
   batcher?.dispose()

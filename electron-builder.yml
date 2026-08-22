@@ -39,6 +39,14 @@ win:
 nsis:
   # Per-user install: no UAC prompt, and uninstall leaves nothing machine-wide.
   perMachine: false
+  # perMachine: false alone does NOT mean "no elevation". It leaves the install
+  # mode page in place, and with allowElevation at its default the "Anyone who
+  # uses this computer" option is live: choosing it relaunches the installer
+  # elevated, so $INSTDIR moves to Program Files while installer.nsh keeps
+  # writing to HKCU and %LOCALAPPDATA% — which are now the *administrator's*.
+  # The user who asked for MyTerm would get no PATH entry and no context menu,
+  # and an unrelated account would get both, pointing at Program Files.
+  allowElevation: false
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
@@ -48,8 +56,18 @@ nsis:
   # Unsigned for now: SmartScreen will warn. See ARCHI § Cost Estimation and the
   # README; SignPath Foundation is the route for a signed open-source build.
 
+# Ce bloc a deux rôles, et le second est facile à oublier : il désigne la cible
+# du téléversement *et* il est la source de l'`app-update.yml` embarqué dans le
+# paquet, c'est-à-dire le dépôt qu'interroge chaque app déjà installée. Déplacer
+# le dépôt sans mettre ces champs à jour couperait les mises à jour du parc.
 publish:
   provider: github
   owner: gganster
   repo: myterm
-  releaseType: release
+  # `draft`, et non `release` : la CI crée la release en brouillon, téléverse
+  # l'installeur et latest.yml, puis la publie (étape « Promote » de
+  # release.yml). Un brouillon est exclu de /releases/latest, donc invisible
+  # pour electron-updater — personne ne peut tomber sur une release à moitié
+  # téléversée. Et un run qui échoue en cours de route laisse un brouillon, que
+  # le run suivant réutilise et complète au lieu de rester bloqué dessus.
+  releaseType: draft
