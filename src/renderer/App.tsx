@@ -34,11 +34,14 @@ export function App(): React.JSX.Element {
     applyTheme(resolvedTheme)
   }, [resolvedTheme])
 
-  // Exposed for the CLI: `myterm .` reaches the main process, which asks the
-  // renderer to open that path through the same single code path as every
-  // other entry point (task 14).
+  // `myterm .` reaches the main process, which asks the renderer to open that
+  // path. It goes through the very same open() as the picker and the recent
+  // list, so the trust gate cannot be bypassed by using the CLI.
   useEffect(() => {
     window.__mytermOpenProject = workspace.open
+    return window.myterm.app.onOpenProjectRequest((projectPath) => {
+      void workspace.open(projectPath)
+    })
   }, [workspace.open])
 
   const trust = workspace.pendingTrust

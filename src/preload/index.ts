@@ -68,6 +68,11 @@ const api = {
     set: (patch: unknown): Promise<unknown> => ipcRenderer.invoke(IPC.prefsSet, patch),
   },
 
+  app: {
+    onOpenProjectRequest: (listener: (projectPath: string) => void): (() => void) =>
+      subscribe<string>(IPC.appOpenProject, listener),
+  },
+
   theme: {
     resolve: (): Promise<ResolvedTheme> => ipcRenderer.invoke(IPC.themeResolve),
     set: (mode: ThemeMode): Promise<ResolvedTheme> => ipcRenderer.invoke(IPC.themeSet, mode),

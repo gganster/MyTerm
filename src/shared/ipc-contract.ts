@@ -32,6 +32,8 @@ export const IPC = {
   workspaceChangedOnDisk: 'workspace:changed-on-disk',
   workspaceTrustRequest: 'workspace:trust-request',
   themeSystemChanged: 'theme:system-changed',
+  /** CLI or second instance asked for a project to be opened. */
+  appOpenProject: 'app:open-project',
 } as const
 
 export type ThemeMode = 'light' | 'dark' | 'system'
