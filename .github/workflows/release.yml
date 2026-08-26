@@ -209,6 +209,60 @@ jobs:
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "$summary" >> "$GITHUB_STEP_SUMMARY"
 
+      # electron-builder téléverse ses artefacts en parallèle, et chaque chemin
+      # de téléversement appelle `getOrCreateRelease` de son côté, sans verrou.
+      # Deux d'entre eux peuvent donc créer *deux* brouillons portant le même
+      # tag, et les assets se répartissent entre les deux.
+      #
+      # Ce n'est pas théorique : v0.1.0 a laissé un brouillon orphelin ne
+      # portant que le .blockmap, et sur v0.2.0 l'installeur et latest.yml ont
+      # atterri sur un brouillon pendant que le blockmap créait l'autre. La
+      # promotion a regardé le mauvais, n'y a pas trouvé latest.yml, et a refusé
+      # de publier — elle a bien fait, mais la release était à refaire.
+      #
+      # On crée donc le brouillon *avant* le packaging : electron-builder le
+      # retrouve par son tag et s'y attache, et plus aucun de ses uploads n'a de
+      # release à créer. Les brouillons existants sont supprimés d'abord plutôt
+      # que réutilisés — un brouillon est invisible pour les clients, et tout ce
+      # qu'il contient est réécrit par le run en cours de toute façon.
+      - name: Prepare draft release
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.gate.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[]' \
+            > "$RUNNER_TEMP/releases.jsonl"
+
+          # En node, et le tag par l'environnement : même raison qu'au Gate, le
+          # tag n'est jamais concaténé dans un programme.
+          stale="$(JSONL="$RUNNER_TEMP/releases.jsonl" node -e '
+            const fs = require("fs")
+            const rels = fs.readFileSync(process.env.JSONL, "utf8")
+              .split("\n").filter(Boolean).map((l) => JSON.parse(l))
+            for (const r of rels) {
+              if (r.tag_name === process.env.TAG && r.draft) process.stdout.write(r.id + "\n")
+            }
+          ')"
+
+          for id in $stale; do
+            echo "Suppression du brouillon résiduel $id ($TAG)."
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+
+          # Un brouillon ne pose pas de tag git : rien à nettoyer côté refs, et
+          # `target_commitish` ne sera honoré qu'à la promotion — il est repassé
+          # là-bas de toute façon.
+          gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$TAG" \
+            -f name="$TAG" \
+            -F draft=true \
+            -f target_commitish="$GITHUB_SHA" > /dev/null
+          echo "Brouillon \`$TAG\` créé avant le packaging." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Package and upload
         # `--publish always` crée le brouillon `v<version>` (releaseType: draft,
         # cf. electron-builder.yml) — ou réutilise celui d'un run précédent, en
@@ -253,7 +307,11 @@ jobs:
           # celle-ci « latest » ferait régresser /releases/latest et figerait
           # les mises à jour du parc. Dans ce cas on publie quand même la
           # release — elle est légitime — simplement sans la marquer « latest ».
-          read -r id make_latest <<<"$(JSONL="$RUNNER_TEMP/releases.jsonl" node -e '
+          # Une affectation simple, et non `read <<< "$(...)"` : dans un
+          # here-string, le statut de la substitution n'est pas celui de la
+          # commande, donc `set -e` ne verrait pas un `exit 1` du programme
+          # ci-dessous — le contrôle de doublon plus bas serait décoratif.
+          selection="$(JSONL="$RUNNER_TEMP/releases.jsonl" node -e '
             const fs = require("fs")
             const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/
             const rels = fs.readFileSync(process.env.JSONL, "utf8")
@@ -265,7 +323,20 @@ jobs:
               }
               return 0
             }
-            const rel = rels.find((r) => r.tag_name === process.env.TAG)
+            // Toutes les releases du tag, pas la première : deux brouillons
+            // homonymes ont déjà existé (cf. « Prepare draft release »), et
+            // `find` en choisissait une au hasard de l’ordre de l’API — donc
+            // parfois celle qui ne portait pas latest.yml. Si le cas se
+            // reproduit malgré la pré-création, on le dit au lieu de tirer à
+            // pile ou face sur la release qu’on rend publique.
+            const matches = rels.filter((r) => r.tag_name === process.env.TAG)
+            if (matches.length > 1) {
+              process.stderr.write("::error::" + matches.length + " releases portent le tag " +
+                process.env.TAG + " (" + matches.map((r) => r.id).join(", ") +
+                "). Publication refusée : impossible de choisir laquelle est la bonne.\n")
+              process.exit(1)
+            }
+            const rel = matches[0]
             const mine = SEMVER.exec(String(process.env.TAG).replace(/^v/, ""))
             let highest = null
             for (const r of rels) {
@@ -278,6 +349,7 @@ jobs:
             // tête, donc un id vide décalerait le second champ dans le premier.
             process.stdout.write((rel ? String(rel.id) : "-") + " " + (isHighest ? "true" : "false"))
           ')"
+          read -r id make_latest <<<"$selection"
 
           if [ "$id" = "-" ]; then
             echo "::error::Aucune release $TAG après le packaging : rien n'a été téléversé."
