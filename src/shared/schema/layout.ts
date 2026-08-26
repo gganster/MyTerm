@@ -12,6 +12,30 @@ export const SHELLS = ['pwsh', 'powershell', 'cmd', 'bash'] as const
 export const THEME_MODES = ['light', 'dark', 'system'] as const
 
 /**
+ * The pane border palette, as *names* rather than values.
+ *
+ * A closed list, and deliberately not a free hex field. The point of the colour
+ * is to tell the halves of a monorepo apart at a glance, and that only works if
+ * every colour stays legible and mutually distinguishable in both themes — a
+ * guarantee no user-supplied `#rrggbb` can carry. The names are the contract;
+ * the two sets of values live in `src/renderer/theme/palette.ts` with the rest
+ * of the colour (ARCHI § Thème).
+ *
+ * Eight is what fits: the hues are ~20° apart at the tightest, and adding a
+ * ninth would have to squeeze between two that are already close.
+ */
+export const PANE_COLORS = [
+  'red',
+  'orange',
+  'yellow',
+  'green',
+  'cyan',
+  'blue',
+  'purple',
+  'pink',
+] as const
+
+/**
  * v2 dropped `grid` and the per-pane `{col, row}`: panes are now an ordered
  * list laid out responsively (ADR-003). v1 files are migrated on read by
  * `migrateLayout`, so bumping this does not orphan anyone's file.
@@ -34,6 +58,11 @@ export const PaneSchema = z.object({
   shell: z.enum(SHELLS).optional(),
   /** Absent means a bare shell, waiting. Nothing is auto-executed. */
   command: z.string().optional(),
+  /**
+   * Border colour. Absent means the theme's own border — the default, and the
+   * only value that follows light/dark instead of standing out from it.
+   */
+  color: z.enum(PANE_COLORS).optional(),
 })
 
 export const DefaultsSchema = z.object({
@@ -78,6 +107,7 @@ export type Pane = z.infer<typeof PaneSchema>
 export type Layout = z.infer<typeof LayoutSchema>
 export type Shell = (typeof SHELLS)[number]
 export type ThemeMode = (typeof THEME_MODES)[number]
+export type PaneColor = (typeof PANE_COLORS)[number]
 
 /** Layout used when a project has no `.myterm.json`. Never written to disk on its own. */
 export function defaultLayout(name?: string): Layout {

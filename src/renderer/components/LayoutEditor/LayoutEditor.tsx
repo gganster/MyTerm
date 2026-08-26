@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Layout, Pane, Shell } from '@shared/schema/layout'
-import { MAX_PANES, SHELLS } from '@shared/schema/layout'
+import type { Layout, Pane, PaneColor, Shell } from '@shared/schema/layout'
+import { MAX_PANES, PANE_COLORS, SHELLS } from '@shared/schema/layout'
 import { addPane, movePane, removePane, updatePane } from '@shared/schema/layout-edit'
 import type { EditResult } from '@shared/schema/layout-edit'
 import { selectPane } from '../../pane-focus'
 import { selectColumns, useStore } from '../../store'
+import { paneBorderColor } from '../../theme/palette'
 
 interface LayoutEditorProps {
   onClose: () => void
@@ -14,11 +15,24 @@ interface LayoutEditorProps {
 /** Fields that define the process: changing one needs a restart to take effect. */
 const RESTART_FIELDS = new Set<keyof Pane>(['cwd', 'shell', 'command'])
 
+/** French labels for the eight names in the file — the file keeps the English. */
+const COLOR_LABELS: Record<PaneColor, string> = {
+  red: 'rouge',
+  orange: 'orange',
+  yellow: 'jaune',
+  green: 'vert',
+  cyan: 'cyan',
+  blue: 'bleu',
+  purple: 'violet',
+  pink: 'rose',
+}
+
 export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): React.JSX.Element {
   const layout = useStore((state) => state.layout)
   const replaceLayout = useStore((state) => state.replaceLayout)
   const focusedPaneId = useStore((state) => state.focusedPaneId)
   const columns = useStore(selectColumns)
+  const resolvedTheme = useStore((state) => state.resolvedTheme)
 
   const [error, setError] = useState<string | null>(null)
   const [pendingRestart, setPendingRestart] = useState<Set<string>>(new Set())
@@ -151,6 +165,21 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
               ].join(' ')}
             >
               <span className="font-mono text-[10px] text-text-muted">{index + 1}</span>
+              {/* The list is where you compare panes, so it is where the
+                  colours have to be readable side by side — not only on the
+                  one pane whose form is open. Not aria-hidden: the colour is
+                  the point of the row, and a dot nobody can read leaves a
+                  screen-reader user with no way to know a pane's colour at
+                  all. The label carries it instead. */}
+              <span
+                data-pane-swatch={pane.id}
+                className="size-2.5 shrink-0 rounded-full border border-border"
+                style={{ backgroundColor: paneBorderColor(resolvedTheme, pane.color) ?? 'transparent' }}
+              >
+                <span className="sr-only">
+                  {pane.color ? `couleur ${COLOR_LABELS[pane.color]}` : 'couleur par défaut'}
+                </span>
+              </span>
               <span className="truncate">{pane.title || pane.id}</span>
             </button>
             {/* On the row, not only on the selected pane's form: selecting
@@ -228,6 +257,58 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
               </button>
             </div>
           </label>
+
+          {/* A radiogroup, not nine toggle buttons: the choice is exclusive,
+              and `aria-pressed` would announce nine independent "pressed /
+              not pressed" controls instead of "bleu, 6 sur 9". */}
+          <fieldset className="flex flex-col gap-1 border-0 p-0">
+            <legend className="text-[11px] text-text-muted">Couleur du contour</legend>
+            <div role="radiogroup" aria-label="Couleur du contour" className="flex flex-wrap items-center gap-1">
+              {/* Selected means *filled*, never "has an accent ring": the accent
+                  is a blue, and on the blue swatch a 1px accent ring around a
+                  2px blue border is the same colour twice. Fill vs outline
+                  reads at a glance whatever the swatch happens to be. */}
+              <button
+                type="button"
+                role="radio"
+                data-color-swatch=""
+                aria-checked={!selected.color}
+                title="Défaut — suit le thème"
+                aria-label="Couleur par défaut, suit le thème"
+                onClick={() => edit({ color: undefined })}
+                className={[
+                  'flex size-6 items-center justify-center rounded border-2 text-[10px]',
+                  !selected.color
+                    ? 'border-accent bg-accent text-accent-contrast'
+                    : 'border-border text-text-muted hover:bg-surface-sunken',
+                ].join(' ')}
+              >
+                ∅
+              </button>
+              {PANE_COLORS.map((color) => {
+                const value = paneBorderColor(resolvedTheme, color) ?? undefined
+                const active = selected.color === color
+                return (
+                  <button
+                    key={color}
+                    type="button"
+                    role="radio"
+                    data-color-swatch={color}
+                    aria-checked={active}
+                    title={COLOR_LABELS[color]}
+                    aria-label={COLOR_LABELS[color]}
+                    onClick={() =>
+                      // Clicking the active colour clears it: the ∅ button is
+                      // the discoverable way out, this is the fast one.
+                      edit({ color: active ? undefined : color })
+                    }
+                    className="size-6 rounded border-2"
+                    style={{ borderColor: value, backgroundColor: active ? value : undefined }}
+                  />
+                )
+              })}
+            </div>
+          </fieldset>
 
           <label className="flex flex-col gap-1 text-[11px] text-text-muted">
             Shell

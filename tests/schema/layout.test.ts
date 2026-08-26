@@ -3,6 +3,7 @@ import {
   LAYOUT_VERSION,
   LayoutSchema,
   MAX_PANES,
+  PANE_COLORS,
   defaultLayout,
   paneShell,
 } from '@shared/schema/layout'
@@ -85,6 +86,30 @@ describe('LayoutSchema', () => {
 
   it('refuse un identifiant vide', () => {
     expect(LayoutSchema.safeParse({ ...validLayout, panes: [{ id: '' }] }).success).toBe(false)
+  })
+
+  it('accepte chacune des huit couleurs de contour', () => {
+    for (const color of PANE_COLORS) {
+      const parsed = LayoutSchema.parse({ ...validLayout, panes: [{ id: 'a', color }] })
+      expect(parsed.panes[0]?.color).toBe(color)
+    }
+  })
+
+  it("laisse la couleur absente quand le fichier n'en déclare pas", () => {
+    // Absent, not defaulted to a value: c'est ce qui fait suivre le thème.
+    const parsed = LayoutSchema.parse({ ...validLayout, panes: [{ id: 'a' }] })
+    expect(parsed.panes[0]).not.toHaveProperty('color')
+  })
+
+  it('refuse une couleur hors de la liste, en nommant le champ', () => {
+    const problems = problemsOf({ ...validLayout, panes: [{ id: 'a', color: 'turquoise' }] })
+    expect(problems.join(' | ')).toContain('panes.0.color')
+  })
+
+  it('refuse un hex libre : la liste est fermée', () => {
+    expect(
+      LayoutSchema.safeParse({ ...validLayout, panes: [{ id: 'a', color: '#ff0000' }] }).success,
+    ).toBe(false)
   })
 })
 

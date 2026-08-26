@@ -121,6 +121,18 @@ Le mode `system` s'appuie sur `nativeTheme.shouldUseDarkColors` d'Electron relay
 
 **Piège documenté d'xterm.js** : `theme` est une option objet comparée par référence. Muter `terminal.options.theme.background` n'a aucun effet ; il faut réassigner un nouvel objet (`terminal.options.theme = { ...next }`). Le changement de thème itère donc le `TerminalRegistry` et réassigne une palette fraîche à chaque instance.
 
+### La couleur de contour d'un pane
+
+Un pane peut porter une `color`, dont l'usage visé est de distinguer d'un coup d'œil les moitiés d'un monorepo. Trois décisions la définissent.
+
+**Une liste fermée de huit noms, pas un champ hexadécimal.** Le nom (`blue`, `green`, …) vit dans `PANE_COLORS` côté schéma ; les *valeurs* vivent dans `palette.ts` avec le reste de la couleur, sous la forme d'un `Record<PaneColor, string>` par thème — ce qui fait échouer la compilation si un nom est ajouté d'un seul côté. Un `#rrggbb` libre serait plus souple et détruirait la garantie : la moitié des hex qu'on choisit spontanément sont illisibles sur l'un des deux fonds, et c'est précisément le problème que le thème clair de première classe existe pour éviter. Huit est ce qui tient : les teintes sont à ~20° l'une de l'autre au plus serré.
+
+**Le nom est stable, la valeur suit le thème.** Chaque couleur existe en deux versions, à ~5:1 de contraste sur le pane blanc et ~7:1 sur le pane sombre, avec moins de 10° de dérive de teinte entre les deux. Un projet « bleu » reste bleu quand on bascule le thème, il ne devient pas turquoise et ne disparaît pas. Ces seuils sont testés (`tests/renderer/pane-color.test.ts`) plutôt que constatés à l'œil : le jour où quelqu'un « éclaircit juste un peu le jaune », c'est le test qui le dit.
+
+**Le défaut n'est pas une neuvième couleur.** Sans `color`, le pane garde `--mt-border`, qui alterne déjà clair/sombre avec le thème ; `paneBorderColor()` rend `null` plutôt qu'une valeur, pour que la retombée reste en CSS. Une couleur explicite épaissit la bordure à 2 px — à 1 px une teinte est un cheveu qu'il faut chercher — et déplace l'indication de focus vers un contour extérieur, car perdre sa couleur au moment précis où on regarde le pane annulerait tout l'intérêt.
+
+**Le focus est *détaché* du contour, et ce détail n'est pas cosmétique.** `accent` est lui-même un bleu : `#0b62d6` en clair, `#4c8dff` en sombre — soit 1,9° de teinte et 1,08:1 de contraste de `paneBorder.blue`. Un anneau de focus collé à la bordure d'un pane bleu serait donc rigoureusement invisible, et le bleu est la couleur qu'un utilisateur choisira en premier. Aucune contrainte sur la palette ne répare cela sans interdire le bleu ; la réparation est géométrique : `outline-offset-2` intercale deux pixels de fond de grille entre la bordure et le contour de focus. Ce qui doit tenir devient alors « l'accent tranche sur la gouttière », ce qui est testé, plutôt que « l'accent tranche sur les huit couleurs », ce qui est faux et le restera.
+
 ---
 
 ## Backend Architecture (main process)
@@ -195,6 +207,7 @@ const PaneSchema = z.object({
   cwd:     z.string().default('.'),          // relatif à la racine du projet
   shell:   z.enum(['pwsh','powershell','cmd','bash']).optional(),
   command: z.string().optional(),            // absent = shell nu, en attente
+  color:   z.enum(PANE_COLORS).optional(),   // absent = bordure du thème
 })
 
 const LayoutSchema = z.object({

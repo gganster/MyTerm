@@ -11,6 +11,7 @@
  * particular has to become dark amber, and the bright variants must go *darker*
  * than their normal counterparts rather than lighter.
  */
+import type { PaneColor } from '@shared/schema/layout'
 
 export interface AnsiPalette {
   background: string
@@ -52,9 +53,19 @@ export interface ChromePalette {
   statusExited: string
 }
 
+/**
+ * The eight pane border colours, one entry per name in `PANE_COLORS`.
+ *
+ * `Record` rather than an interface: adding a name to the schema then breaks
+ * both themes at compile time, which is the only way two lists this far apart
+ * stay in step.
+ */
+export type PaneBorderPalette = Record<PaneColor, string>
+
 export interface Palette {
   chrome: ChromePalette
   ansi: AnsiPalette
+  paneBorder: PaneBorderPalette
 }
 
 export const light: Palette = {
@@ -98,6 +109,22 @@ export const light: Palette = {
     brightCyan: '#125861',
     brightWhite: '#404752',
   },
+  // Held at ~4.9:1 against the white pane and ~4.2:1 against the sunken gutter,
+  // so no colour reads as "the faint one". The dark set below carries the same
+  // eight hues (±9°) at the luminance that side needs: a project keeps its
+  // identity across a theme switch, it does not get recoloured.
+  paneBorder: {
+    red: '#d1242f',
+    orange: '#c4460a',
+    // Not a true yellow: on white it would be invisible, and it has to stay
+    // ~25° clear of orange to remain a *different* marker.
+    yellow: '#8a6d00',
+    green: '#1a7f37',
+    cyan: '#1b7c83',
+    blue: '#0969da',
+    purple: '#8250df',
+    pink: '#bf3989',
+  },
 }
 
 export const dark: Palette = {
@@ -139,6 +166,17 @@ export const dark: Palette = {
     brightCyan: '#56d4dd',
     brightWhite: '#f0f6fc',
   },
+  // Same eight hues as the light set, lifted to ~7:1 against the dark pane.
+  paneBorder: {
+    red: '#ff7b72',
+    orange: '#fa9b52',
+    yellow: '#d8b024',
+    green: '#3fb950',
+    cyan: '#39c5cf',
+    blue: '#58a6ff',
+    purple: '#bc8cff',
+    pink: '#f778ba',
+  },
 }
 
 export const palettes = { light, dark } as const
@@ -146,4 +184,20 @@ export type ResolvedThemeName = keyof typeof palettes
 
 export function paletteFor(theme: ResolvedThemeName): Palette {
   return palettes[theme]
+}
+
+/**
+ * The border a pane should paint, or null for "use the theme's own border".
+ *
+ * Returning null rather than the default border value keeps the fallback in
+ * CSS, where the theme already lives: an uncoloured pane goes on following
+ * `--mt-border` without this function having to know what that is.
+ */
+export function paneBorderColor(theme: ResolvedThemeName, color?: PaneColor): string | null {
+  if (!color) return null
+  const { paneBorder } = palettes[theme]
+  // hasOwn, not `?? null`: the schema rejects unknown names long before this,
+  // but `paneBorder['constructor']` would return a *function* — truthy, so it
+  // would sail past a nullish check and reach a style attribute. Own keys only.
+  return Object.hasOwn(paneBorder, color) ? paneBorder[color] : null
 }

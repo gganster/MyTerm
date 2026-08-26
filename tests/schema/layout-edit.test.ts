@@ -59,6 +59,28 @@ describe('updatePane', () => {
     const result = updatePane(base, 'a', { id: 'b' })
     expect(result.ok).toBe(false)
   })
+
+  it('pose la couleur de contour demandée', () => {
+    const result = updatePane(base, 'a', { color: 'blue' })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.layout.panes[0]).toMatchObject({ color: 'blue' })
+  })
+
+  it('efface la clé couleur au retour au défaut, plutôt que de la vider', () => {
+    const colored = updatePane(base, 'a', { color: 'green' })
+    expect(colored.ok).toBe(true)
+    if (!colored.ok) return
+    const cleared = updatePane(colored.layout, 'a', { color: undefined })
+    expect(cleared.ok).toBe(true)
+    if (!cleared.ok) return
+    expect(cleared.layout.panes[0]).not.toHaveProperty('color')
+  })
+
+  it('rejette une couleur hors liste sans altérer le layout', () => {
+    const result = updatePane(base, 'a', { color: 'turquoise' } as never)
+    expect(result.ok).toBe(false)
+  })
 })
 
 describe('movePane', () => {
@@ -91,6 +113,13 @@ describe('movePane', () => {
 })
 
 describe('panesNeedingRestart', () => {
+  it('ignore un changement de couleur : repeindre un contour ne tue pas un shell', () => {
+    const recolored = updatePane(base, 'a', { color: 'purple' })
+    expect(recolored.ok).toBe(true)
+    if (!recolored.ok) return
+    expect(panesNeedingRestart(base, recolored.layout)).toEqual([])
+  })
+
   it('ignore un simple renommage', () => {
     const renamed = updatePane(base, 'a', { title: 'nouveau nom' })
     expect(renamed.ok).toBe(true)

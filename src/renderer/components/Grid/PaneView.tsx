@@ -4,6 +4,7 @@ import { focusPane } from '../../pane-focus'
 import { createTerminal } from '../../terminal/create-terminal'
 import { disposeTerminal, getTerminal, registerTerminal } from '../../terminal/registry'
 import { selectIsFocused, selectIsHidden, useStore } from '../../store'
+import { paneBorderColor } from '../../theme/palette'
 import { PaneHeader } from './PaneHeader'
 
 interface PaneViewProps {
@@ -28,6 +29,10 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
   const isHidden = useStore(selectIsHidden(paneId))
   const isZoomed = useStore((state) => state.zoomedPaneId === paneId)
   const setPaneStatus = useStore((state) => state.setPaneStatus)
+  // The colour is a *theme-dependent* value, so it is resolved here rather than
+  // written into a class: the same `color: "blue"` is two different hexes.
+  const resolvedTheme = useStore((state) => state.resolvedTheme)
+  const borderColor = paneBorderColor(resolvedTheme, pane.color)
 
   useEffect(() => {
     const container = containerRef.current
@@ -131,14 +136,29 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
       data-pane={paneId}
       data-focused={isFocused || undefined}
       data-zoomed={isZoomed || undefined}
+      data-pane-color={pane.color ?? undefined}
       onMouseDown={() => focusPane(paneId)}
+      // A coloured pane keeps its colour even while focused — losing it there
+      // would blank the one pane you are looking at, which is precisely when
+      // knowing which repo you are in matters. Focus moves to a ring instead.
+      style={borderColor ? { borderColor } : undefined}
       // No explicit placement: panes flow in document order and the grid wraps
       // them (ADR-003). Zoom is handled by GridView collapsing to one cell;
       // hidden siblings keep `display: none` rather than unmounting, which
       // would destroy their terminals and scrollback.
       className={[
-        'flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md border bg-surface',
-        isFocused ? 'border-accent' : 'border-border',
+        'flex min-h-0 min-w-0 flex-col overflow-hidden rounded-md bg-surface',
+        // 2px when coloured: at 1px a hue is a hairline you have to look for,
+        // which defeats the whole point. The default border stays at 1px so
+        // nothing changes for a workspace that never sets a colour.
+        borderColor ? 'border-2' : `border ${isFocused ? 'border-accent' : 'border-border'}`,
+        // Where the border is already spoken for, focus moves outward — and it
+        // must NOT simply abut the colour: the accent is itself a blue, 1.9°
+        // and 1.08:1 from `paneBorder.blue`, so an outline flush against a blue
+        // pane's border is invisible. `outline-offset-2` puts two pixels of the
+        // grid's own background between the two bands, which is what makes the
+        // focus readable whatever colour the pane carries.
+        borderColor && isFocused ? 'outline-2 outline-offset-2 outline-accent' : '',
         isHidden ? 'hidden' : '',
       ].join(' ')}
     >

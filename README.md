@@ -20,14 +20,28 @@ Pas de base de données, pas d'historique de sessions, pas d'émulation d'IDE. U
     { "id": "claude-1", "title": "Claude · feature", "command": "claude" },
     { "id": "claude-2", "title": "Claude · review",  "command": "claude" },
     { "id": "claude-3", "title": "Claude · libre",   "command": "claude" },
-    { "id": "web",  "title": "frontend", "cwd": "frontend", "command": "npm run dev" },
-    { "id": "api",  "title": "backend",  "cwd": "backend",  "command": "npm run dev" },
+    { "id": "web",  "title": "frontend", "cwd": "frontend", "command": "npm run dev", "color": "blue" },
+    { "id": "api",  "title": "backend",  "cwd": "backend",  "command": "npm run dev", "color": "green" },
     { "id": "free", "title": "scratch" }
   ]
 }
 ```
 
 `theme` vaut `light`, `dark` ou `system`. Un pane sans `command` démarre sur un shell vierge, en attente. Les `cwd` sont relatifs à la racine du projet et ne peuvent pas en sortir. (Le fichier est du JSON strict : pas de commentaires.)
+
+### La couleur d'un pane
+
+`color` peint le contour du pane, pour repérer d'un coup d'œil à quelle partie d'un monorepo un terminal appartient. Huit noms, et rien d'autre :
+
+| | | | | | | | |
+|---|---|---|---|---|---|---|---|
+| `red` | `orange` | `yellow` | `green` | `cyan` | `blue` | `purple` | `pink` |
+
+Pas de code hexadécimal : chaque nom existe en deux versions, une par thème, choisies pour rester lisibles sur blanc **et** sur noir sans changer de teinte. Un pane bleu reste bleu quand vous basculez le thème — un `#ffe680` choisi à la main sur fond sombre, lui, serait invisible en thème clair.
+
+**Un pane sans `color` suit le thème** : contour discret, clair sur sombre et sombre sur clair, exactement comme avant. La couleur est un marqueur qu'on pose, pas un champ à remplir.
+
+Le contour se choisit aussi depuis l'éditeur intégré (bouton **Layout** → *Couleur du contour*) ; `∅` remet le pane au défaut. Changer une couleur ne redémarre rien : le shell qui tourne dans le pane n'est pas concerné.
 
 **Il n'y a pas de coordonnées à écrire** : l'ordre de la liste est la disposition, et le nombre de terminaux par ligne suit la largeur de la fenêtre.
 

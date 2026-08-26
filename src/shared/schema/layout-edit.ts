@@ -55,6 +55,7 @@ export function updatePane(layout: Layout, paneId: string, patch: Partial<Pane>)
       // clean and diffs stay small.
       if (!next.command) delete next.command
       if (!next.shell) delete next.shell
+      if (!next.color) delete next.color
       return next
     }),
   })
