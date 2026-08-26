@@ -155,6 +155,8 @@ prefs:get() / prefs:set(p)  → Preferences
 theme:resolve()             → 'light' | 'dark'
 status:usage-get()          → UsageSnapshot   // dernier quota connu
 status:load-get()           → SystemLoad      // dernier échantillon CPU/RAM
+editor:list()               → EditorInfo[]    // éditeurs externes installés
+editor:open(editorId)       → ok | raison     // ouvre le projet courant dedans
 ```
 
 **Main → Renderer** — `webContents.send`, flux poussé :
@@ -238,7 +240,8 @@ L'app exécute des commandes arbitraires décrites dans un fichier **commité da
 
 3. **`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`.** Le preload n'utilise que `contextBridge` + `ipcRenderer`, tous deux disponibles en sandbox ; aucun module Node n'a besoin d'être chargé côté renderer.
 4. **Aucun contenu distant.** Le renderer ne charge que des fichiers locaux, `webSecurity` reste activé, et `will-navigate` / `setWindowOpenHandler` sont bloqués.
-5. **Une seule sortie réseau authentifiée, confinée au main.** La barre de statut lit le quota Claude sur l'endpoint OAuth d'usage. Le jeton est lu depuis le fichier de credentials de Claude Code, posé dans un unique en-tête `Authorization`, puis oublié : il ne franchit jamais l'IPC, n'apparaît dans aucun log, et les échecs sont réduits à des codes grossiers (`no-credentials`, `token-expired`, `http-429`, `network`) — jamais un message d'exception, qui embarquerait le chemin absolu du fichier. Le point 4 reste vrai : c'est le main qui parle au réseau, le renderer ne charge toujours que du local.
+5. **Le seul autre process lancé sur demande du renderer est un éditeur, désigné par un id.** Les boutons « VS Code » / « Antigravity » de l'en-tête envoient `editor:open` avec un identifiant d'une liste fermée — jamais un chemin, jamais une ligne de commande. Le main résout l'exécutable parmi des emplacements d'installation connus, refuse un id qu'il ne connaît pas (y compris une clé héritée d'`Object.prototype`), et passe **sa** racine de projet, pas celle que le renderer prétendrait. Aucun shell n'est interposé : les shims `code.cmd` / `antigravity.cmd` exigeraient `shell: true`, ce qui réintroduirait l'interprétation de la chaîne. Sous la marque Antigravity cohabitent deux produits ; seul `Antigravity IDE.exe` ouvre réellement un dossier — le Manager ignore l'argument, constaté à l'exécution.
+6. **Une seule sortie réseau authentifiée, confinée au main.** La barre de statut lit le quota Claude sur l'endpoint OAuth d'usage. Le jeton est lu depuis le fichier de credentials de Claude Code, posé dans un unique en-tête `Authorization`, puis oublié : il ne franchit jamais l'IPC, n'apparaît dans aucun log, et les échecs sont réduits à des codes grossiers (`no-credentials`, `token-expired`, `http-429`, `network`) — jamais un message d'exception, qui embarquerait le chemin absolu du fichier. Le point 4 reste vrai : c'est le main qui parle au réseau, le renderer ne charge toujours que du local.
 
 
 ### La barre de statut
@@ -251,7 +254,7 @@ Un pied de fenêtre permanent, présent dans les deux vues (sélecteur de projet
 
 **Un échec ne vide pas la barre.** Tant que la dernière mesure réussie a moins de 15 minutes, elle reste affichée avec un `⋯` discret et l'explication en infobulle. Une barre qui clignote vers « indisponible » à chaque hoquet de Wi-Fi est une barre qu'on cesse de lire ; au-delà de 15 minutes, elle avoue ne pas savoir plutôt que de mentir.
 
-Deux règles d'affichage, corollaires du PRD : une valeur inconnue vaut `—`, **jamais** `0 %` (un quota à zéro se lit « intact », soit l'inverse de « on ne sait pas »), et la couleur ne sert qu'à alerter — en dessous de 75 % la jauge est grise, sinon une barre en permanence verte apprendrait à l'œil à sauter la ligne, y compris quand elle passe au rouge.
+Deux règles d'affichage, corollaires du PRD : une valeur inconnue vaut `—`, **jamais** `0 %` (un quota à zéro se lit « intact », soit l'inverse de « on ne sait pas »), et une jauge nominale est verte. L'escalade reste réservée au quota — orange à 75 %, rouge à 90 % — et une mesure inconnue garde le gris plutôt que d'afficher une santé qu'elle n'a pas mesurée. Les valeurs chiffrées, elles, restent en gris jusqu'au seuil d'alerte : c'est ce qui permet à l'escalade de ressortir sur une barre verte la plupart du temps.
 
 Le CPU et la RAM viennent d'`os.cpus()` et `os.totalmem()`, échantillonnés toutes les 2 s dans le main. Aucune dépendance ajoutée. La charge CPU n'existe qu'en delta entre deux relevés — d'où un échantillonneur avec état côté main, et de l'arithmétique pure dans `@shared/system-load`, testable sans machine chargée.
 
@@ -318,7 +321,7 @@ Troisième porte d'entrée, et la plus courte : un clic droit dans le dossier du
 Trois points qui ne s'improvisent pas :
 
 - La commande est `"$INSTDIR\MyTerm.exe" "%V"`. **`%V`, pas `%1`** : le menu du fond de dossier n'a aucun élément cliqué à substituer, `%1` y est vide et MyTerm s'ouvrirait sur l'écran d'accueil — un échec silencieux, puisque l'entrée apparaît et lance bien l'application.
-- `MultiSelectModel = Single` sur le verbe du dossier. Sans cet attribut, un verbe en ligne de commande est invoqué **une fois par élément sélectionné** : six dossiers sélectionnés démarrent six `MyTerm.exe`, et six fenêtres MyTerm s'ouvrent d'un coup.
+- `MultiSelectModel = Single` sur le verbe du dossier. Sans cet attribut, un verbe en ligne de commande est invoqué **une fois par élément sélectionné** : six dossiers sélectionnés démarrent six `MyTerm.exe`, et six fenetres MyTerm s'ouvrent d'un coup.
 - Elle vise l'exécutable, pas `myterm.cmd` : un `.cmd` ferait clignoter une console à chaque lancement, et le shim n'existe que pour *retrouver* le dossier d'installation depuis un terminal.
 - Elle n'ouvre aucun chemin de code nouveau : le dossier arrive dans `argv` et repart dans `parseCliArgs`, donc validation et **contrôle de confiance** s'appliquent à l'identique. Trois portes d'entrée, une seule implémentation (ADR-004).
 

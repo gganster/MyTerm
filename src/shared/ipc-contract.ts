@@ -30,6 +30,8 @@ export const IPC = {
   themeSet: 'theme:set',
   statusUsageGet: 'status:usage-get',
   statusLoadGet: 'status:load-get',
+  editorList: 'editor:list',
+  editorOpen: 'editor:open',
 
   // main -> renderer (send, pushed streams)
   paneData: 'pane:data',
@@ -152,6 +154,26 @@ export interface UsageSnapshot {
 
 /** Payload of `status:load`. Declared in `./system-load` next to the arithmetic that produces it. */
 export type { SystemLoad }
+
+/**
+ * The external IDEs the header can hand the project to.
+ *
+ * An *id*, not a path or a command: this is what the renderer is allowed to
+ * name, and the main process alone decides which executable it maps to and
+ * which folder is passed to it (ARCHI § Sécurité, point 2).
+ */
+export type ExternalEditorId = 'vscode' | 'antigravity'
+
+export interface ExternalEditorInfo {
+  id: ExternalEditorId
+  label: string
+  /** False when no install could be located — the button stays visible but disabled. */
+  available: boolean
+}
+
+export type OpenInEditorResult =
+  | { ok: true }
+  | { ok: false; reason: 'no-project' | 'not-installed' | 'launch-failed' }
 
 export type SaveLayoutResult =
   | { ok: true; warnings: { paneId: string; message: string }[] }

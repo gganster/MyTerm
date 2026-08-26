@@ -9,6 +9,9 @@ import type {
   ThemeMode,
 } from '@shared/ipc-contract'
 import type {
+  ExternalEditorId,
+  ExternalEditorInfo,
+  OpenInEditorResult,
   OpenWorkspaceResult,
   SaveLayoutResult,
   TrustDecision,
@@ -38,6 +41,7 @@ import { PtyManager } from '../services/pty-manager'
 import { disposeLoadMonitor, getSystemLoad, initLoadMonitor } from '../services/load-monitor'
 import { disposeUpdater, initUpdater, installUpdate } from '../services/updater'
 import { disposeUsagePolling, getUsage, initUsagePolling } from '../services/usage'
+import { listEditors, openInEditor } from '../services/external-editor'
 import { workspaceState } from '../services/workspace-state'
 import { isInsideRoot } from '../util/resolve-cwd'
 import { getMainWindow } from '../window'
@@ -233,6 +237,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.statusUsageGet, (): UsageSnapshot => getUsage())
   ipcMain.handle(IPC.statusLoadGet, (): SystemLoad => getSystemLoad())
+
+  // ---- external editors ----------------------------------------------------
+
+  ipcMain.handle(IPC.editorList, (): ExternalEditorInfo[] => listEditors())
+
+  // The renderer passes an editor id and nothing else: the folder handed to the
+  // IDE is the project root the main process itself opened.
+  ipcMain.handle(
+    IPC.editorOpen,
+    (_event, id: ExternalEditorId): Promise<OpenInEditorResult> =>
+      openInEditor(id, workspaceState.projectRoot),
+  )
 
   // ---- preferences ---------------------------------------------------------
 

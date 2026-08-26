@@ -9,15 +9,17 @@ import { useStatus } from '../../hooks/use-status'
  * Present in every view, including the project picker — a quota you only see
  * once a project is open is a quota you discover too late.
  *
- * Discretion is the design constraint, and it is enforced by two rules:
+ * Two rules shape it:
  *
- * 1. **Colour means "look at me", and only the quota earns it.** A quota gauge
- *    under 75 % is drawn in the neutral border colour; only warn and critical
- *    borrow the status palette. A footer that is permanently green trains the
- *    eye to skip it, which would make the red one invisible too. CPU and RAM
- *    stay neutral at every value on purpose: a terminal multiplexer pegs the
- *    CPU at 100 % on every build, so a load gauge that reddened would be red
- *    most of the day and would drag the quota next to it into the noise.
+ * 1. **A healthy gauge is green; escalation is what changes.** Every fill at a
+ *    nominal level uses the running colour, so the bar reads as "fine" at a
+ *    glance. Only the quota escalates from there — amber at 75 %, red at 90 % —
+ *    and an unknown reading stays neutral rather than claiming health it does
+ *    not have. CPU and RAM never escalate on purpose: a terminal multiplexer
+ *    pegs the CPU at 100 % on every build, so a load gauge that reddened would
+ *    be red most of the day and would drag the quota next to it into the noise.
+ *    The numeric values stay muted until warn, so escalation still stands out
+ *    against a bar that is green most of the time.
  * 2. **Nothing here is clickable.** A control in the footer would take focus
  *    away from the terminal, and getting it back is the user's problem. The
  *    main process polls; the bar only renders.
@@ -25,7 +27,7 @@ import { useStatus } from '../../hooks/use-status'
 
 const FILL_CLASS: Record<QuotaTone, string> = {
   unknown: 'bg-border-strong/40',
-  ok: 'bg-border-strong',
+  ok: 'bg-status-running',
   warn: 'bg-status-attention',
   critical: 'bg-status-exited',
 }

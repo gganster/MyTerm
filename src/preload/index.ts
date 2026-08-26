@@ -13,6 +13,9 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import { IPC } from '@shared/ipc-contract'
 import type {
+  ExternalEditorId,
+  ExternalEditorInfo,
+  OpenInEditorResult,
   PaneDataEvent,
   PaneExitEvent,
   PaneSpawnRequest,
@@ -91,6 +94,13 @@ const api = {
     getLoad: (): Promise<SystemLoad> => ipcRenderer.invoke(IPC.statusLoadGet),
     onLoad: (listener: (load: SystemLoad) => void): (() => void) =>
       subscribe<SystemLoad>(IPC.statusLoad, listener),
+  },
+
+  /** External IDEs. The renderer names an id; the main process owns the rest. */
+  editor: {
+    list: (): Promise<ExternalEditorInfo[]> => ipcRenderer.invoke(IPC.editorList),
+    open: (id: ExternalEditorId): Promise<OpenInEditorResult> =>
+      ipcRenderer.invoke(IPC.editorOpen, id),
   },
 
   theme: {

@@ -3,6 +3,7 @@ import { GridView } from './components/Grid/GridView'
 import { LayoutEditor } from './components/LayoutEditor/LayoutEditor'
 import { ProjectPicker } from './components/ProjectPicker/ProjectPicker'
 import { StatusBar } from './components/StatusBar/StatusBar'
+import { OpenInEditor } from './components/OpenInEditor'
 import { ReloadBanner } from './components/ReloadBanner'
 import { UpdateBanner } from './components/UpdateBanner'
 import { ThemeToggle } from './components/ThemeToggle'
@@ -114,6 +115,7 @@ export function App(): React.JSX.Element {
         <span className="truncate text-text-muted" title={projectPath}>
           {projectName}
         </span>
+        <OpenInEditor />
         {dirty ? (
           <span data-dirty className="text-[11px] text-status-attention">
             • non enregistré
