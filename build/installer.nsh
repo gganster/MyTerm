@@ -1,12 +1,15 @@
 ; MyTerm NSIS customisation: install the CLI shim, put it on the user PATH, and
 ; register the two Explorer context-menu verbs.
 ;
-; PATH editing is delegated to PowerShell rather than done with NSIS string
-; operations. NSIS strings are capped (1024 chars in a default build) and a
-; long PATH would be silently truncated — destroying the user's PATH is the
-; single worst thing an installer of this size could do. PowerShell's
-; [Environment]::SetEnvironmentVariable also broadcasts WM_SETTINGCHANGE, so
-; newly opened terminals see the change without a sign-out.
+; PATH editing is delegated to resources/path-entry.ps1 rather than done with
+; NSIS string operations. NSIS strings are capped (1024 chars in a default
+; build) and a long PATH would be silently truncated — destroying the user's
+; PATH is the single worst thing an installer of this size could do.
+;
+; It is a script file and not an inline -Command, because an inline one is
+; exactly how this feature shipped broken from 0.1.0 through 0.2.0 — see the
+; comment on the call itself. `-File` takes a path and carries no quoting, so
+; that bug class is gone rather than patched.
 ;
 ; Everything here is per-user (HKCU, %LOCALAPPDATA%): no elevation, and an
 ; uninstall that leaves no working trace — the empty `Directory\shell` parents
@@ -27,9 +30,34 @@
   CreateDirectory "$LOCALAPPDATA\MyTerm\bin"
   CopyFiles /SILENT "$INSTDIR\resources\myterm.cmd" "$LOCALAPPDATA\MyTerm\bin\myterm.cmd"
 
-  nsExec::ExecToLog 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bin = Join-Path $$env:LOCALAPPDATA ''MyTerm\bin''; $$current = [Environment]::GetEnvironmentVariable(''Path'', ''User''); if ($$null -eq $$current) { $$current = '''' }; $$parts = $$current -split '';'' | Where-Object { $$_ -ne '''' }; if ($$parts -notcontains $$bin) { $$updated = (@($$parts) + $$bin) -join '';''; [Environment]::SetEnvironmentVariable(''Path'', $$updated, ''User'') }"'
+  ; The PATH edit lives in resources/path-entry.ps1, invoked with -File, and it
+  ; is deliberately not an inline command any more.
+  ;
+  ; It used to be one, and it never worked. NSIS escapes a quote as $\' rather
+  ; than by doubling it, so the ''Path'' in that command reached PowerShell
+  ; verbatim; PowerShell reads '' as the empty string, and
+  ; GetEnvironmentVariable(''Path'', ''User'') is a parse error. The command
+  ; died before touching anything, from 0.1.0 through 0.2.0.
+  ;
+  ; Measured on a real install rather than deduced: myterm.cmd was in
+  ; %LOCALAPPDATA%\MyTerm\bin and HKCU\Software\MyTerm\InstallDir was set, so
+  ; this macro had run to its end, while the user PATH held no MyTerm entry at
+  ; all. -File takes a path and nothing else, so that whole class of bug is gone
+  ; rather than fixed.
+  ;
+  ; The script is run from the copy next to the shim, not from $INSTDIR: the
+  ; uninstaller needs it too, and $INSTDIR is the thing being removed.
+  CopyFiles /SILENT "$INSTDIR\resources\path-entry.ps1" "$LOCALAPPDATA\MyTerm\bin\path-entry.ps1"
+
+  nsExec::ExecToLog 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$LOCALAPPDATA\MyTerm\bin\path-entry.ps1" -Mode Add'
   Pop $0
-  DetailPrint "PATH utilisateur mis a jour (code $0)"
+  ; Checked, not just printed. The old line printed "PATH utilisateur mis a
+  ; jour (code $0)" whatever $0 was, which is exactly why nobody noticed.
+  ${If} $0 == 0
+    DetailPrint "PATH utilisateur mis a jour : $LOCALAPPDATA\MyTerm\bin"
+  ${Else}
+    DetailPrint "ECHEC de l'ajout au PATH (code $0). La commande myterm ne sera pas disponible dans un terminal ; le raccourci et le menu contextuel fonctionnent."
+  ${EndIf}
 
   DetailPrint "Ajout de MyTerm au menu contextuel de l'explorateur…"
 
@@ -84,8 +112,14 @@
   DetailPrint "Retrait du CLI myterm…"
 
   ; Removes only our own entry; every other PATH element is preserved verbatim.
-  nsExec::ExecToLog 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$bin = Join-Path $$env:LOCALAPPDATA ''MyTerm\bin''; $$current = [Environment]::GetEnvironmentVariable(''Path'', ''User''); if ($$current) { $$parts = $$current -split '';'' | Where-Object { $$_ -ne '''' -and $$_ -ne $$bin }; [Environment]::SetEnvironmentVariable(''Path'', ($$parts -join '';''), ''User'') }"'
+  ; Same script, -Mode Remove. The old inline command carried the identical
+  ; doubled-quote defect, so the uninstall could never have removed the entry
+  ; the install could never have added.
+  nsExec::ExecToLog 'powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$LOCALAPPDATA\MyTerm\bin\path-entry.ps1" -Mode Remove'
   Pop $0
+  ${If} $0 != 0
+    DetailPrint "ECHEC du retrait du PATH (code $0) : l'entree $LOCALAPPDATA\MyTerm\bin peut subsister."
+  ${EndIf}
 
   ; DeleteRegKey, not DeleteRegValue: the whole `MyTerm` subtree is ours and an
   ; emptied-out `MyTerm\command` would still be an entry in the user's shell.
@@ -95,6 +129,7 @@
   DeleteRegKey HKCU "Software\Classes\Directory\Background\shell\MyTerm"
 
   Delete "$LOCALAPPDATA\MyTerm\bin\myterm.cmd"
+  Delete "$LOCALAPPDATA\MyTerm\bin\path-entry.ps1"
   RMDir "$LOCALAPPDATA\MyTerm\bin"
   RMDir "$LOCALAPPDATA\MyTerm"
   DeleteRegKey HKCU "Software\MyTerm"

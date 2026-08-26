@@ -66,7 +66,10 @@ L'installation se fait **par utilisateur** : aucune élévation, aucune écritur
 ## Utilisation
 
 - **Écran d'accueil** : la liste des projets récents, ou *Ouvrir un dossier…*
-- **CLI** : `myterm .` depuis le dossier d'un projet. L'installeur ajoute le shim à votre `PATH` utilisateur. Si MyTerm tourne déjà, la fenêtre existante ouvre le projet — jamais une seconde instance.
+- **CLI** : `myterm .` depuis le dossier d'un projet. L'installeur dépose le shim dans `%LOCALAPPDATA%\MyTerm\bin` et ajoute ce dossier à la fin de votre `PATH` utilisateur — jamais au `PATH` système, donc sans droits administrateur. Ouvrez un nouveau terminal après l'installation : celui qui tournait déjà a hérité de l'ancien `PATH`.
+- **Plusieurs projets à la fois** : chaque `myterm .` ouvre sa propre fenêtre, avec ses propres shells. Les fenêtres sont décalées d'un cran pour ne pas se recouvrir, et se partagent les projets récents et les approbations sans s'écraser mutuellement.
+
+  > Si `myterm` reste introuvable après l'installation, la version installée est antérieure à la 0.3.0 : l'ajout au `PATH` y échouait en silence. Réinstallez depuis la dernière release.
 - **Menu contextuel** : clic droit **sur** un dossier → *Ouvrir dans MyTerm*, ou clic droit **dans le vide** d'un dossier déjà ouvert → *Ouvrir MyTerm ici*. L'installeur enregistre les deux entrées ; la désinstallation les retire.
 
   > **Sous Windows 11, ces entrées sont dans « Afficher plus d'options »** (le menu long), pas dans le menu compact qui apparaît au premier clic droit. `Maj+F10` y va directement. Le menu compact n'accepte que les applications dotées d'une **identité de paquet signée** (MSIX, ou paquet *sparse*) ; MyTerm n'est même pas signé.

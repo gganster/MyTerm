@@ -1,7 +1,6 @@
-import { MAX_TRUSTED_PROJECTS } from '@shared/schema/preferences'
 import { normaliseProjectPath } from '@shared/normalise-path'
 import { commandsHash, commandsOf, stripCommands } from '@shared/trust-hash'
-import { getPreferences, updatePreferences } from './preferences'
+import { getPreferences, recordRevoke, recordTrust } from './preferences'
 import type { ResolvedPane } from './workspace-state'
 
 /**
@@ -28,26 +27,20 @@ export function isTrusted(projectPath: string, hash: string): boolean {
   )
 }
 
+/**
+ * An approval and a withdrawal are recorded as *what changed*, never as a new
+ * copy of the whole list. With several instances sharing preferences.json, a
+ * list written wholesale is indistinguishable from a stale cache: another
+ * window saving a moment later would put back the approval this one just
+ * withdrew, re-arming autolaunch on a repository the user had refused.
+ * @shared/schema/preferences-merge is where the two are told apart.
+ */
 export function trustProject(projectPath: string, hash: string): void {
-  const key = normaliseProjectPath(projectPath)
-  const others = getPreferences().trustedProjects.filter(
-    (entry) => normaliseProjectPath(entry.path) !== key,
-  )
-  updatePreferences({
-    trustedProjects: [{ path: projectPath, commandsHash: hash }, ...others].slice(
-      0,
-      MAX_TRUSTED_PROJECTS,
-    ),
-  })
+  recordTrust(projectPath, hash)
 }
 
 export function revokeProject(projectPath: string): void {
-  const key = normaliseProjectPath(projectPath)
-  updatePreferences({
-    trustedProjects: getPreferences().trustedProjects.filter(
-      (entry) => normaliseProjectPath(entry.path) !== key,
-    ),
-  })
+  recordRevoke(projectPath)
 }
 
 /** A layout with no autolaunch command has nothing to approve. */

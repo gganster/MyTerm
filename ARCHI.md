@@ -47,7 +47,7 @@ Trois principes gouvernent toutes les décisions ci-dessous.
 │                     détection d'état (BEL / idle)      │
 │                                                        │
 │  PreferencesStore   projets récents, thème             │
-│  AppLifecycle       single-instance lock, argv du CLI  │
+│  AppLifecycle       registre d'instances, argv du CLI  │
 └────────────────────────┬───────────────────────────────┘
                          │  ipcMain.handle  (requêtes)
                          │  webContents.send (flux sortie)
@@ -277,8 +277,34 @@ Pas de `electron-store` : une lecture, des écritures débouncées, le même hel
 
 - L'installeur NSIS dépose `myterm.cmd` dans `%LOCALAPPDATA%\MyTerm\bin` et ajoute ce dossier au `PATH` **utilisateur** (jamais au PATH système : pas de droits admin requis, désinstallation propre).
 - Le shim résout le chemin absolu du dossier courant et lance l'exécutable avec ce chemin en argument.
-- Côté app : `app.requestSingleInstanceLock()`. Une seconde invocation ne démarre pas un second Electron — elle transmet son `argv` à l'instance existante via l'événement `second-instance`, qui ouvre le projet et met la fenêtre au premier plan.
+- Côté app : **rien**. Chaque invocation est son propre processus, avec sa fenêtre et ses shells — voir *Instances multiples* ci-dessous.
 - Le `argv` est traité comme une entrée non fiable : on vérifie que le chemin existe et qu'il s'agit d'un dossier avant toute chose.
+
+**L'édition du `PATH` est un script, `resources/path-entry.ps1`, appelé en `-File`.** Elle a été une commande PowerShell inline, et elle n'a jamais fonctionné : de 0.1.0 à 0.2.0 incluses, le shim était copié, la clé de registre écrite, l'installeur annonçait « PATH utilisateur mis a jour », et l'entrée n'était jamais ajoutée. NSIS échappe un guillemet par `$\'`, pas en le doublant, donc le `''Path''` de cette commande arrivait tel quel à PowerShell — qui lit `''` comme la chaîne vide — et l'appel mourait sur une erreur de syntaxe avant de toucher à quoi que ce soit. Le code de retour de `nsExec` était affiché, jamais testé. Constaté sur une installation réelle, pas déduit. `-File` ne prend qu'un chemin : la classe de bug disparaît au lieu d'être corrigée, et le code de retour est maintenant vérifié.
+
+**Le script n'utilise pas `[Environment]::SetEnvironmentVariable`.** Cette API écrit toujours en `REG_SZ`, alors qu'un `PATH` utilisateur est souvent `REG_EXPAND_SZ` : le réécrire ainsi transformerait chacune de ses entrées `%VAR%` en littéral mort. Ajouter une entrée ne doit jamais pouvoir casser les autres. La valeur est donc lue brute (`DoNotExpandEnvironmentNames`), réécrite via l'API registre **avec le type qu'elle avait**, puis `WM_SETTINGCHANGE` est diffusé explicitement — sans quoi l'explorateur continue de distribuer son bloc d'environnement périmé et `myterm` reste introuvable jusqu'à la session suivante. L'entrée est ajoutée **en fin** de `PATH` : MyTerm n'a pas à masquer une commande que l'utilisateur résout déjà ailleurs.
+
+### Instances multiples
+
+`myterm .` dans deux projets doit donner deux fenêtres. C'est la raison d'être d'un terminal *à portée de projet*, et le verrou d'instance unique l'interdisait : la seconde invocation transmettait son `argv` à la première et sortait. Le verrou est retiré.
+
+Ce que le verrou achetait en silence n'est pas gratuit pour autant, et est payé explicitement :
+
+| Ressource partagée | Ce qui casserait | Le mécanisme |
+|---|---|---|
+| `preferences.json` | Écrire son cache écrase ce que les autres ont changé depuis | Relecture, fusion des *intentions* de ce processus, écriture (`@shared/schema/preferences-merge`) |
+| La même écriture, en concurrence | Deux relectures, deux fusions, une intention perdue | Verrou de fichier (`withFileLock`) autour du cycle lire-fusionner-écrire |
+| Le fichier temporaire de `atomicWrite` | Un `<path>.tmp` fixe, deux processus écrivant dedans, un entrelacement renommé par-dessus l'original | Le pid dans le nom du temporaire |
+| electron-updater | Plusieurs téléchargements dans un cache commun | Seule l'instance **élue** vérifie |
+| `quitAndInstall` | L'installeur ferme *toutes* les fenêtres, pas seulement celle qui a cliqué | Confirmation modale si d'autres instances sont vivantes |
+
+**La fusion des préférences.** Une sauvegarde n'est pas « persiste mon cache » mais « rejoue mes intentions sur le fichier tel qu'il est maintenant ». Les scalaires touchés ici (`theme`, `window`) gagnent — c'est la dernière action de l'utilisateur ; une clé que ce processus n'a jamais écrite est reprise du disque intacte. Les deux listes sont reconstruites à partir de la copie disque, puis reçoivent les ajouts et retraits de ce processus.
+
+Les intentions sont **en attente, jamais permanentes** : elles sont effacées dès que l'écriture a atterri. C'est tout l'argument de sûreté de `revoked` (ADR-004). Conservées, une instance ayant approuvé un projet le matin ressusciterait cette approbation au prochain déplacement de sa fenêtre, annulant une révocation faite entre-temps ailleurs et réarmant l'autolaunch sur un dépôt que l'utilisateur venait de refuser. Effacées, la révocation tient. C'est aussi pourquoi `trustProject` / `revokeProject` passent par `recordTrust` / `recordRevoke` plutôt que par `updatePreferences` : une liste réécrite en bloc est indiscernable d'un cache périmé.
+
+**Le registre d'instances** (`services/instances.ts`) est un fichier par processus dans `userData/instances`. Il répond aux deux questions que le verrou répondait : *qui vérifie les mises à jour* (la plus ancienne vivante, réévaluée à chaque tick — quand elle s'en va, la suivante reprend sans rien à transmettre) et *combien d'autres tournent* (pour la confirmation avant installation). Une entrée doit être **vivante et récente** : le seul test de pid ne suffit pas, Windows recycle les numéros, et l'entrée d'une instance tuée dont le pid appartient désormais à un autre programme n'expirerait jamais — élue en tête, elle laisserait le parc sans aucune vérification de mise à jour.
+
+**La cascade.** Chaque instance restaure la même géométrie sauvegardée, donc sans décalage la seconde fenêtre s'ouvre exactement sur la première : indiscernable d'un CLI cassé. Elle est décalée d'un cran par instance vivante, puis ramenée dans la zone de travail.
 
 ### Le menu contextuel de l'explorateur
 
@@ -292,9 +318,9 @@ Troisième porte d'entrée, et la plus courte : un clic droit dans le dossier du
 Trois points qui ne s'improvisent pas :
 
 - La commande est `"$INSTDIR\MyTerm.exe" "%V"`. **`%V`, pas `%1`** : le menu du fond de dossier n'a aucun élément cliqué à substituer, `%1` y est vide et MyTerm s'ouvrirait sur l'écran d'accueil — un échec silencieux, puisque l'entrée apparaît et lance bien l'application.
-- `MultiSelectModel = Single` sur le verbe du dossier. Sans cet attribut, un verbe en ligne de commande est invoqué **une fois par élément sélectionné** : six dossiers sélectionnés démarrent six `MyTerm.exe`, dont cinq perdent le verrou d'instance unique et poussent tour à tour leur projet dans la même fenêtre.
+- `MultiSelectModel = Single` sur le verbe du dossier. Sans cet attribut, un verbe en ligne de commande est invoqué **une fois par élément sélectionné** : six dossiers sélectionnés démarrent six `MyTerm.exe`, et six fenêtres MyTerm s'ouvrent d'un coup.
 - Elle vise l'exécutable, pas `myterm.cmd` : un `.cmd` ferait clignoter une console à chaque lancement, et le shim n'existe que pour *retrouver* le dossier d'installation depuis un terminal.
-- Elle n'ouvre aucun chemin de code nouveau : le dossier arrive dans `argv` et repart dans `parseCliArgs`, donc verrou d'instance unique, validation et **contrôle de confiance** s'appliquent à l'identique. Trois portes d'entrée, une seule implémentation (ADR-004).
+- Elle n'ouvre aucun chemin de code nouveau : le dossier arrive dans `argv` et repart dans `parseCliArgs`, donc validation et **contrôle de confiance** s'appliquent à l'identique. Trois portes d'entrée, une seule implémentation (ADR-004).
 
 **Racine de lecteur.** `%V` conserve l'antislash final : la ligne de commande se termine par `"C:\"`, et `CommandLineToArgvW` — celui qui construit `process.argv` — lit `\"` comme un guillemet échappé. L'argument reçu est `C:"`, ni absolu ni existant, et l'utilisateur retombe sur l'écran d'accueil sans un mot. Le fond d'une fenêtre de lecteur sert bien les verbes `Directory\Background\shell`, le cas est donc atteignable ; `myterm C:\` depuis un terminal y tombe aussi. La réparation est dans `cli-args.ts`, côté application : un `"` final ne peut pas venir d'autre part, ce caractère étant illégal dans un chemin Windows.
 
@@ -472,7 +498,7 @@ MyTerm/
     │   ├── ipc-contract.ts      # noms de canaux + signatures typées
     │   └── pane-status.ts       # enum + machine d'état
     ├── main/
-    │   ├── index.ts             # app lifecycle, single-instance, argv CLI
+    │   ├── index.ts             # app lifecycle, registre d'instances, argv CLI
     │   ├── window.ts
     │   ├── services/
     │   │   ├── workspace.ts     # lecture/écriture/watch .myterm.json
@@ -546,7 +572,7 @@ Aligné sur les jalons M1–M5 du PRD.
 10. Ouverture d'un projet : lecture, spawn de la grille, autolaunch, résolution des `cwd`.
 11. `TrustDialog` et persistance des projets approuvés (ADR-004).
 12. Écran de projets récents, `preferences.json`, restauration de la géométrie de fenêtre.
-13. Shim CLI `myterm .`, single-instance lock, traitement d'`argv`.
+13. Shim CLI `myterm .`, instances multiples, traitement d'`argv`.
 
 ### Phase 4 — L'édition (M4)
 14. Éditeur de layout : ajout/suppression/déplacement de panes, édition de `cwd`/shell/commande, redimensionnement de la grille.

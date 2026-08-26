@@ -1,5 +1,6 @@
-import { app } from 'electron'
+import { app, dialog } from 'electron'
 import electronUpdater from 'electron-updater'
+import { isPrimaryInstance, otherInstanceCount } from './instances'
 
 /**
  * Background updates via GitHub Releases.
@@ -11,6 +12,16 @@ import electronUpdater from 'electron-updater'
  *    the user's call, never ours.
  * 2. Failures are silent. Being offline, or GitHub rate-limiting, is not
  *    something to interrupt someone's work over.
+ *
+ * Several instances can run at once, and both rules had to be re-earned:
+ *
+ * - Only the elected instance checks. Every instance polling would multiply the
+ *   GitHub requests and, worse, point several electron-updater downloads at one
+ *   shared cache folder — the same partial file written twice.
+ * - `quitAndInstall` hands over to the NSIS installer, which closes *every*
+ *   MyTerm on the machine, not just the one whose banner was clicked. Rule 1
+ *   would be a fiction if this process only counted its own panes, so an
+ *   install with other instances alive asks first.
  *
  * Disabled outside a packaged build: electron-updater throws on every start
  * otherwise, and `npm run dev` should not be noisy.
@@ -47,6 +58,10 @@ export function initUpdater(callbacks: {
   })
 
   const check = (): void => {
+    // Re-asked every tick rather than decided once: the elected instance is
+    // simply the oldest one alive, so when it quits the next one picks the duty
+    // up on its own schedule with nothing to hand over.
+    if (!isPrimaryInstance()) return
     void autoUpdater.checkForUpdates().catch(() => undefined)
   }
 
@@ -59,10 +74,37 @@ export function initUpdater(callbacks: {
 /**
  * Applies a downloaded update. Refuses while panes are alive unless the caller
  * states the user was warned and accepted.
+ *
+ * The second gate is the one the banner cannot cover. Its warning speaks for
+ * the window it is drawn in; the installer closes the other windows too, and
+ * their shells are not this renderer's to spend. So when another instance is
+ * alive the choice is put to the user here, in a modal, before anything quits.
  */
-export function installUpdate(options: { force: boolean; hasLivePanes: () => boolean }): boolean {
+export async function installUpdate(options: {
+  force: boolean
+  hasLivePanes: () => boolean
+}): Promise<boolean> {
   if (!app.isPackaged) return false
   if (options.hasLivePanes() && !options.force) return false
+
+  const others = otherInstanceCount()
+  if (others > 0) {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Installer et tout fermer', 'Annuler'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Mise à jour de MyTerm',
+      message:
+        others === 1
+          ? 'Une autre fenêtre MyTerm est ouverte.'
+          : `${others} autres fenêtres MyTerm sont ouvertes.`,
+      detail:
+        "L'installation ferme toutes les fenêtres MyTerm, et les shells qui y tournent, pas seulement celle-ci.",
+    })
+    if (response !== 0) return false
+  }
+
   autoUpdater.quitAndInstall(false, true)
   return true
 }

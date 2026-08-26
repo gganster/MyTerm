@@ -15,6 +15,7 @@ import type {
   UsageSnapshot,
 } from '@shared/ipc-contract'
 import type { SystemLoad } from '@shared/system-load'
+import { DisplayPreferencesSchema } from '@shared/schema/preferences'
 import type { Preferences } from '@shared/schema/preferences'
 import {
   closeWorkspace,
@@ -218,7 +219,7 @@ export function registerIpcHandlers(): void {
     hasLivePanes,
   })
 
-  ipcMain.handle(IPC.appInstallUpdate, (_event, force: boolean): boolean =>
+  ipcMain.handle(IPC.appInstallUpdate, (_event, force: boolean): Promise<boolean> =>
     installUpdate({ force, hasLivePanes }),
   )
 
@@ -236,9 +237,22 @@ export function registerIpcHandlers(): void {
   // ---- preferences ---------------------------------------------------------
 
   ipcMain.handle(IPC.prefsGet, (): Preferences => getPreferencesForRenderer())
-  ipcMain.handle(IPC.prefsSet, (_event, patch: Partial<Preferences>): Preferences =>
-    updatePreferences(patch),
-  )
+
+  // Narrowed to the two display preferences, and validated on the way in.
+  //
+  // Forwarding the patch whole let a renderer write `trustedProjects` and
+  // approve any project it liked — the one thing deciding trust in main exists
+  // to prevent (ADR-004). Approvals and recent projects have their own handlers.
+  //
+  // Validated because this is where untrusted input enters: an unchecked theme
+  // or window object would be written out verbatim, and the next start would
+  // fail to parse the file and fall back to defaults — a renderer able to erase
+  // someone's preferences. The schema is the same one that guards the file.
+  ipcMain.handle(IPC.prefsSet, (_event, patch: unknown): Preferences => {
+    const result = DisplayPreferencesSchema.safeParse(patch)
+    if (!result.success) return getPreferencesForRenderer()
+    return updatePreferences(result.data)
+  })
 
   // ---- theme ---------------------------------------------------------------
 

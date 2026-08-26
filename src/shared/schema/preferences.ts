@@ -43,6 +43,20 @@ export const PreferencesSchema = z.object({
   window: WindowStateSchema.default({ width: 1600, height: 1000, maximized: false }),
 })
 
+/**
+ * The subset a renderer is allowed to set through `prefs:set`.
+ *
+ * Derived from the schema above rather than restated, so a field added there
+ * cannot silently become writable from the renderer: it has to be listed here
+ * on purpose. `recentProjects` and `trustedProjects` are excluded by design —
+ * approving a project is a main-process decision (ADR-004).
+ */
+export const DisplayPreferencesSchema = PreferencesSchema.pick({
+  theme: true,
+  window: true,
+}).partial()
+
+export type DisplayPreferences = z.infer<typeof DisplayPreferencesSchema>
 export type RecentProject = z.infer<typeof RecentProjectSchema>
 export type TrustedProject = z.infer<typeof TrustedProjectSchema>
 export type WindowState = z.infer<typeof WindowStateSchema>

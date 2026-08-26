@@ -19,9 +19,14 @@ files:
   - '!**/*.map'
 
 extraResources:
-  # The CLI shim, copied to %LOCALAPPDATA%\MyTerm\bin by installer.nsh.
+  # Both are copied to %LOCALAPPDATA%\MyTerm\bin by installer.nsh: the CLI shim,
+  # and the PATH editor that the install and uninstall macros both invoke. The
+  # second is run from that copy rather than from the install directory, because
+  # the uninstaller needs it and the install directory is what it is removing.
   - from: resources/myterm.cmd
     to: myterm.cmd
+  - from: resources/path-entry.ps1
+    to: path-entry.ps1
 
 # A .node binary cannot be loaded from inside an asar archive. Getting this
 # wrong produces an app that runs perfectly in development and shows six empty
