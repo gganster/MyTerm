@@ -6,6 +6,7 @@ import { paletteFor } from '../theme/palette'
 import type { ResolvedThemeName } from '../theme/palette'
 import type { TerminalHandle } from './registry'
 import { isAppShortcut } from '../hooks/use-shortcuts'
+import { isNewlineChord, NEWLINE_SEQUENCE } from './key-chords'
 
 export function ansiTheme(theme: ResolvedThemeName): ITheme {
   // A fresh object every time on purpose: xterm compares `theme` by reference,
@@ -30,7 +31,24 @@ export function createTerminal(theme: ResolvedThemeName): TerminalHandle {
   // Returning false stops xterm from forwarding the key to the pty. Only the
   // app's own Ctrl+Shift bindings are withheld; everything else, Ctrl+C first
   // among them, belongs to whatever runs in the pane.
-  terminal.attachCustomKeyEventHandler((event) => !isAppShortcut(event))
+  terminal.attachCustomKeyEventHandler((event) => {
+    if (isAppShortcut(event)) return false
+
+    if (isNewlineChord(event)) {
+      // `input`, not `paste`: paste applies bracketed-paste framing, so an
+      // application that had turned the mode on would receive
+      // `\x1b[200~\n\x1b[201~` and treat the newline as pasted content.
+      // `input` raises the same onData a typed key raises, which is the one
+      // path to the pty (PaneView) and also scrolls the viewport back down.
+      //
+      // Guarded on keydown because xterm runs this handler for keypress too,
+      // and an unguarded chord would send the line feed twice.
+      if (event.type === 'keydown') terminal.input(NEWLINE_SEQUENCE)
+      return false
+    }
+
+    return true
+  })
 
   const handle: TerminalHandle = {
     terminal,

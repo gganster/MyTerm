@@ -113,6 +113,20 @@ uiSlice          focusedPaneId, zoomedPaneId, theme, editorOpen, columns
 
 `@xterm/addon-search` n'est pas installé au MVP — la recherche dans le scrollback est explicitement post-MVP dans le PRD.
 
+### À qui appartient une touche
+
+Un terminal réclame presque toutes les frappes, donc la règle par défaut est simple : **tout part au pane**. Les exceptions sont nommées une par une dans `terminal/key-chords.ts`, en prédicats purs — les deux sens de l'erreur sont silencieux (voler une touche dont le shell avait besoin, ou ne rien faire du raccourci), et ni le gestionnaire global ni celui d'xterm ne se teste sans DOM. Même raisonnement que `trust-hash` (§ Tests).
+
+Deux frappes sont retenues, et pour deux raisons différentes.
+
+**`Ctrl+Shift+C` — copier.** `Ctrl+C` est `SIGINT` et appartient au processus ; c'est pourquoi tous les émulateurs mettent la copie derrière `Shift`. Rien n'écoutait cette combinaison auparavant : xterm n'envoie **rien** pour `Ctrl+Shift+lettre` (mesuré), donc l'interception ne retire aucun octet au shell. La copie doit être explicite parce que la sélection d'un terminal n'est pas une sélection du document — avec le renderer WebGL le texte est peint sur un canvas et n'existe pas dans le DOM, donc la commande de copie du navigateur n'a rien à quoi s'accrocher. C'était la cause de « impossible de copier ». `navigator.clipboard` est joignable depuis ce renderer malgré le sandbox — vérifié à l'exécution, pas supposé — et une écriture n'exige pas d'autorisation puisqu'elle se produit dans une frappe.
+
+**`Ctrl+Entrée` — un saut de ligne, pas une soumission.** Un terminal ne sait pas les distinguer : le protocole n'a pas de bits de modificateur pour `Entrée`, et xterm envoie `\r` pour `Entrée`, `Ctrl+Entrée` et `Maj+Entrée` indifféremment (mesuré). La séquence émise est un saut de ligne nu, soit exactement l'octet que `Ctrl+J` envoie déjà : Claude Code documente `Ctrl+J` comme le raccourci multiligne qui fonctionne dans tous les terminaux sans configuration, là où `Maj+Entrée` exige un terminal parlant le protocole *extended keys*. Un pane servant d'abord à faire tourner un agent CLI (PRD), le raccourci est câblé sur la séquence que cet agent comprend déjà plutôt que sur une nouvelle. Vérifié aussi sur un shell nu : PSReadLine ouvre une invite de continuation `>>` et n'exécute rien.
+
+L'injection passe par `terminal.input()`, pas par `terminal.paste()` : `paste` applique l'encadrement *bracketed paste*, et une application ayant activé le mode recevrait `\x1b[200~\n\x1b[201~`. `input` lève le même `onData` qu'une touche tapée, donc le chemin vers le pty reste unique. Le garde sur `keydown` n'est pas décoratif : xterm appelle aussi ce gestionnaire pour `keypress`, et sans lui le saut de ligne partirait deux fois.
+
+`Maj+Entrée` est délibérément laissé au pane : personne ne l'a demandé, et il vaut `Entrée` aujourd'hui — le détourner changerait un comportement acquis sans qu'on l'ait choisi.
+
 ### Thème : une seule source de vérité
 
 Le thème existe à deux endroits (le CSS de l'app et la palette ANSI d'xterm) et doit rester cohérent. Un module `src/renderer/theme/palette.ts` exporte, pour chaque mode, un objet unique consommé des deux côtés : les variables CSS Tailwind pour le chrome, un objet `ITheme` pour chaque terminal.
@@ -521,6 +535,7 @@ MyTerm/
         ├── terminal/
         │   ├── registry.ts      # Map<paneId, Terminal> — hors React
         │   ├── create-terminal.ts
+        │   ├── key-chords.ts    # qui possède une touche — prédicats purs
         │   └── theme.ts         # palette → ITheme
         ├── theme/palette.ts     # source unique light/dark
         ├── components/

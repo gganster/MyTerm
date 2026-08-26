@@ -80,6 +80,8 @@ Peu importe la porte : le [contrôle de confiance](#sécurité) s'applique à l'
 
 | Raccourci | Action |
 |---|---|
+| `Ctrl+Shift+C` | copier la sélection du pane focalisé |
+| `Ctrl+Entrée` | insérer un saut de ligne **sans** exécuter |
 | `Ctrl+Shift+Z` | agrandir / réduire le pane focalisé |
 | `Ctrl+Shift+←↑→↓` | déplacer le focus d'un terminal à l'autre |
 | `Ctrl+Shift+1..9` | focus direct sur le n-ième pane |
@@ -87,6 +89,10 @@ Peu importe la porte : le [contrôle de confiance](#sécurité) s'applique à l'
 | `Échap` | réduire le pane agrandi |
 
 Tout le reste appartient au shell : `Ctrl+C`, `Ctrl+D`, `Ctrl+L`, `Ctrl+R` et `Échap` ne sont jamais interceptés.
+
+**Copier.** `Ctrl+C` ne peut pas être la copie — c'est `SIGINT`, et il appartient au processus en cours ; d'où la variante `Shift`, comme dans tous les émulateurs de terminal. La sélection d'un terminal n'est pas une sélection du document (avec le rendu WebGL le texte est peint sur un canvas et n'est pas dans le DOM), donc la commande de copie du navigateur n'a rien à quoi s'accrocher : c'est pour cela qu'aucun moyen ne fonctionnait avant. Sans rien de sélectionné, le raccourci ne fait rien plutôt que de vider le presse-papier.
+
+**Aller à la ligne.** Un terminal ne sait pas distinguer `Entrée` de `Ctrl+Entrée` : le protocole n'a pas de bits de modificateur pour cette touche, et les deux partent en `\r`. MyTerm intercepte donc `Ctrl+Entrée` et envoie un saut de ligne nu — exactement l'octet que `Ctrl+J` envoie déjà, que Claude Code documente comme le raccourci multiligne fonctionnant partout sans configuration. `Maj+Entrée` est laissé tel quel, c'est-à-dire équivalent à `Entrée`.
 
 ### Le badge d'activité
 
