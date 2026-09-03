@@ -92,6 +92,14 @@ export function registerIpcHandlers(): void {
       statusTracker?.exit(paneId, exitCode, Date.now())
       push(IPC.paneExit, { paneId, exitCode })
     },
+    // A pane we closed ourselves — a PaneView unmounting, a workspace being
+    // replaced, the app quitting. Nothing is pushed to the renderer, but the
+    // buffered output and the status state have to go, or the idle tick keeps
+    // reporting on a pane that no longer exists.
+    onClosed: (paneId) => {
+      batcher?.remove(paneId)
+      statusTracker?.remove(paneId)
+    },
   })
 
   // Single low-frequency tick for the weak "silence means idle" signal. 400 ms
@@ -135,10 +143,10 @@ export function registerIpcHandlers(): void {
     getPtyManager().resize(paneId, cols, rows)
   })
 
+  // The batcher and the status tracker are cleaned up by `onClosed`, which
+  // every kill goes through — including the ones that do not come from here.
   ipcMain.handle(IPC.paneKill, (_event, paneId: string) => {
     getPtyManager().kill(paneId)
-    batcher?.remove(paneId)
-    statusTracker?.remove(paneId)
   })
 
   // ---- workspace (filled in by tasks 10-16) --------------------------------
