@@ -1,6 +1,6 @@
 {
   "name": "myterm",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Project-scoped terminal multiplexer for agent-driven development",
   "main": "./out/main/index.js",
   "author": "gganster",
