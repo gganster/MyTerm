@@ -4,7 +4,7 @@ import { MAX_PANES, PANE_COLORS, SHELLS } from '@shared/schema/layout'
 import { addPane, movePane, removePane, updatePane } from '@shared/schema/layout-edit'
 import type { EditResult } from '@shared/schema/layout-edit'
 import { selectPane } from '../../pane-focus'
-import { selectColumns, useStore } from '../../store'
+import { selectCollapsedPaneIds, selectColumns, useStore } from '../../store'
 import { paneBorderColor } from '../../theme/palette'
 
 interface LayoutEditorProps {
@@ -31,6 +31,8 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
   const layout = useStore((state) => state.layout)
   const replaceLayout = useStore((state) => state.replaceLayout)
   const focusedPaneId = useStore((state) => state.focusedPaneId)
+  const setCollapsed = useStore((state) => state.setCollapsed)
+  const collapsedPaneIds = useStore(selectCollapsedPaneIds)
   const columns = useStore(selectColumns)
   const resolvedTheme = useStore((state) => state.resolvedTheme)
 
@@ -181,6 +183,18 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
                 </span>
               </span>
               <span className="truncate">{pane.title || pane.id}</span>
+              {/* Selecting a row does not unfold, so without this the list
+                  would give no way to tell which panes are in the bottom bar
+                  and which are on the grid. */}
+              {collapsedPaneIds.includes(pane.id) ? (
+                <span
+                  data-editor-collapsed={pane.id}
+                  title="réduit dans la barre du bas"
+                  className="ml-auto shrink-0 text-[10px] text-text-muted"
+                >
+                  ⤓<span className="sr-only">réduit</span>
+                </span>
+              ) : null}
             </button>
             {/* On the row, not only on the selected pane's form: selecting
                 another pane must not take away the action the user was about
@@ -337,6 +351,32 @@ export function LayoutEditor({ onClose, onRestartPane }: LayoutEditorProps): Rea
               onChange={(event) => edit({ command: event.target.value })}
               className="resize-y rounded border border-border bg-surface px-2 py-1 font-mono text-xs text-text"
             />
+          </label>
+
+          {/* Writes the file's default *and* applies it now. The two could be
+              separated, and separating them would mean ticking « démarrer
+              réduit » does nothing visible until the next launch — a control
+              whose only feedback is tomorrow. Unticking likewise brings the
+              pane back. Folding by hand afterwards stays view state and never
+              comes near the file. */}
+          <label className="flex items-start gap-2 text-[11px] text-text-muted">
+            <input
+              type="checkbox"
+              data-pane-collapsed
+              checked={Boolean(selected.collapsed)}
+              onChange={(event) => {
+                edit({ collapsed: event.target.checked })
+                setCollapsed(selected.id, event.target.checked)
+              }}
+              className="mt-0.5 accent-accent"
+            />
+            <span>
+              Démarrer réduit
+              <span className="block text-text-muted/80">
+                Le pane s'ouvre dans la barre du bas. Son shell et sa commande démarrent
+                normalement.
+              </span>
+            </span>
           </label>
 
           {pendingRestart.has(selected.id) ? (

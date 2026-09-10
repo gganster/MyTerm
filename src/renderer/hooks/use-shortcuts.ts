@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { neighbourIndex } from '@shared/responsive-grid'
 import { focusPane } from '../pane-focus'
-import { useStore } from '../store'
+import { useStore, visiblePanes } from '../store'
 import { isCopyChord } from '../terminal/key-chords'
 import { getTerminal } from '../terminal/registry'
 
@@ -15,8 +15,9 @@ import { getTerminal } from '../terminal/registry'
  *
  *   Ctrl+Shift+C        copy the focused pane's selection
  *   Ctrl+Shift+Z        zoom / unzoom the focused pane
+ *   Ctrl+Shift+M        fold the focused pane into the bottom bar, or unfold it
  *   Ctrl+Shift+arrows   move focus through the panes as they are laid out
- *   Ctrl+Shift+1..9     focus the nth pane
+ *   Ctrl+Shift+1..9     focus the nth pane, unfolding it if it was folded
  *   Escape              unzoom, and only when something is zoomed
  *
  * They are also given up entirely while the caret is in a form field: in the
@@ -48,6 +49,7 @@ export function isAppShortcut(event: Pick<KeyboardEvent, 'ctrlKey' | 'shiftKey' 
   if (event.ctrlKey && event.shiftKey) {
     if (isCopyChord(event)) return true
     if (event.key.toLowerCase() === 'z') return true
+    if (event.key.toLowerCase() === 'm') return true
     if (ARROWS.has(event.key)) return true
     if (/^[1-9]$/.test(event.key)) return true
     return false
@@ -123,6 +125,14 @@ export function useShortcuts(): void {
         return
       }
 
+      if (event.key.toLowerCase() === 'm') {
+        state.toggleCollapse()
+        return
+      }
+
+      // Indexed on the file's list, not on what is currently on the grid: the
+      // nth pane is the nth pane whether or not it is folded, and asking for
+      // one by number brings it back (focusPane unfolds).
       if (/^[1-9]$/.test(event.key)) {
         const target = panes[Number(event.key) - 1]
         if (target) focusPane(target.id)
@@ -130,11 +140,16 @@ export function useShortcuts(): void {
       }
 
       if (ARROWS.has(event.key)) {
-        const from = panes.findIndex((pane) => pane.id === state.focusedPaneId)
+        // The arrows walk the *grid*, so they walk the panes that are on it:
+        // neighbourIndex reasons in rows of `columns` cells, and a folded pane
+        // holds no cell. Handing it the full list would make "the pane to my
+        // right" name something in the bottom bar.
+        const visible = visiblePanes(state)
+        const from = visible.findIndex((pane) => pane.id === state.focusedPaneId)
         const current = from === -1 ? 0 : from
-        if (!panes[current]) return
-        const target = neighbourIndex(current, panes.length, state.columns, event.key)
-        if (target !== null) focusPane(panes[target]!.id)
+        if (!visible[current]) return
+        const target = neighbourIndex(current, visible.length, state.columns, event.key)
+        if (target !== null) focusPane(visible[target]!.id)
       }
     }
 
@@ -144,7 +159,14 @@ export function useShortcuts(): void {
   }, [])
 
   // Nothing is focused on first paint, so the first keystroke would be lost.
-  const firstPaneId = useStore((state) => state.layout.panes[0]?.id ?? null)
+  // The first pane *on the grid*, since a workspace may declare its first one
+  // folded — the ring has to land somewhere the user can see it.
+  const firstPaneId = useStore(
+    (state) =>
+      state.layout.panes.find((pane) => !state.collapsedPaneIds.includes(pane.id))?.id ??
+      state.layout.panes[0]?.id ??
+      null,
+  )
   const focusedPaneId = useStore((state) => state.focusedPaneId)
   useEffect(() => {
     if (focusedPaneId || !firstPaneId) return

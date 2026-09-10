@@ -22,4 +22,13 @@ export interface PaneRuntime {
   status: PaneStatus
   pid?: number
   exitCode?: number
+  /**
+   * Last line the pane was asked to run — the layout's autolaunch command to
+   * begin with, then whatever the user submits.
+   *
+   * Renderer-side only: nothing in the main process produces it, and it exists
+   * so a pane folded into the bottom bar can still say what it is doing
+   * without being unfolded.
+   */
+  lastCommand?: string
 }

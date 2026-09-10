@@ -36,9 +36,18 @@ export function selectPane(paneId: string): boolean {
 }
 
 export function focusPane(paneId: string): void {
-  if (selectPane(paneId)) {
+  // Unfolding belongs here rather than in selectPane, and the split is the
+  // point: handing the keyboard to a folded pane means bringing it back first,
+  // whereas the layout editor selecting a row means "edit this one" and has no
+  // business dragging a background job onto the grid to do it.
+  const unfolds = useStore.getState().collapsedPaneIds.includes(paneId)
+  if (unfolds) useStore.getState().setCollapsed(paneId, false)
+
+  if (selectPane(paneId) || unfolds) {
     // The pane React is about to reveal cannot take focus yet: a textarea
-    // inside a `display: none` subtree ignores focus() silently.
+    // inside a `display: none` subtree ignores focus() silently, and so does
+    // one inside an `inert` subtree — which is what a folded pane still is
+    // until this render commits.
     requestAnimationFrame(() => getTerminal(paneId)?.terminal.focus())
     return
   }

@@ -1,14 +1,15 @@
 import { selectPaneStatus, useStore } from '../../store'
 import type { PaneStatus } from '@shared/pane-status'
 
-const LABELS: Record<PaneStatus, string> = {
+/** Exported: the collapsed bar names and colours the same four states. */
+export const STATUS_LABELS: Record<PaneStatus, string> = {
   running: 'en cours',
   attention: 'attend une réponse',
   idle: 'inactif',
   exited: 'terminé',
 }
 
-const DOT: Record<PaneStatus, string> = {
+export const STATUS_DOT: Record<PaneStatus, string> = {
   running: 'bg-status-running',
   attention: 'bg-status-attention',
   idle: 'bg-status-idle',
@@ -29,8 +30,8 @@ export function PaneBadge({ paneId }: { paneId: string }): React.JSX.Element {
   return (
     <span
       data-status={status}
-      title={LABELS[status]}
-      aria-label={LABELS[status]}
+      title={STATUS_LABELS[status]}
+      aria-label={STATUS_LABELS[status]}
       className={[
         'inline-flex items-center gap-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium',
         attention ? 'bg-status-attention/12 text-status-attention' : 'text-text-muted',
@@ -39,11 +40,11 @@ export function PaneBadge({ paneId }: { paneId: string }): React.JSX.Element {
       <span
         className={[
           'inline-block h-1.5 w-1.5 rounded-full',
-          DOT[status],
+          STATUS_DOT[status],
           attention ? 'animate-pulse' : '',
         ].join(' ')}
       />
-      {attention ? LABELS[status] : null}
+      {attention ? STATUS_LABELS[status] : null}
     </span>
   )
 }

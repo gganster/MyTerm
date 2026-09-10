@@ -111,6 +111,23 @@ describe('LayoutSchema', () => {
       LayoutSchema.safeParse({ ...validLayout, panes: [{ id: 'a', color: '#ff0000' }] }).success,
     ).toBe(false)
   })
+
+  it('accepte « collapsed » et le laisse absent quand le fichier se tait', () => {
+    const parsed = LayoutSchema.parse({
+      ...validLayout,
+      panes: [{ id: 'tunnel', command: 'cloudflared tunnel run', collapsed: true }, { id: 'b' }],
+    })
+    expect(parsed.panes[0]).toMatchObject({ collapsed: true })
+    // Pas de valeur par défaut : un pane qui n'a jamais été replié ne doit pas
+    // gagner un « collapsed: false » dans le fichier de tout le monde.
+    expect(parsed.panes[1]).not.toHaveProperty('collapsed')
+  })
+
+  it('refuse une valeur non booléenne pour « collapsed »', () => {
+    expect(
+      LayoutSchema.safeParse({ ...validLayout, panes: [{ id: 'a', collapsed: 'oui' }] }).success,
+    ).toBe(false)
+  })
 })
 
 describe('paneShell', () => {

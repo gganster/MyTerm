@@ -90,7 +90,7 @@ Trois principes gouvernent toutes les décisions ci-dessous.
 ```
 workspaceSlice   projectPath, layout (panes ordonnés), dirty
 runtimeSlice     Map<paneId, { status, exitCode, pid }>
-uiSlice          focusedPaneId, zoomedPaneId, theme, editorOpen, columns
+uiSlice          focusedPaneId, zoomedPaneId, collapsedPaneIds, theme, editorOpen, columns
 ```
 
 - *Pourquoi* : les badges d'activité changent plusieurs fois par seconde sur 6 panes. Avec Context + useReducer, chaque changement re-rend tout l'arbre sous le provider ; avec Zustand, un `PaneBadge` s'abonne à `state.runtime.get(id).status` via un sélecteur et lui seul se re-rend.
@@ -146,6 +146,18 @@ Un pane peut porter une `color`, dont l'usage visé est de distinguer d'un coup 
 **Le défaut n'est pas une neuvième couleur.** Sans `color`, le pane garde `--mt-border`, qui alterne déjà clair/sombre avec le thème ; `paneBorderColor()` rend `null` plutôt qu'une valeur, pour que la retombée reste en CSS. Une couleur explicite épaissit la bordure à 2 px — à 1 px une teinte est un cheveu qu'il faut chercher — et déplace l'indication de focus vers un contour extérieur, car perdre sa couleur au moment précis où on regarde le pane annulerait tout l'intérêt.
 
 **Le focus est *détaché* du contour, et ce détail n'est pas cosmétique.** `accent` est lui-même un bleu : `#0b62d6` en clair, `#4c8dff` en sombre — soit 1,9° de teinte et 1,08:1 de contraste de `paneBorder.blue`. Un anneau de focus collé à la bordure d'un pane bleu serait donc rigoureusement invisible, et le bleu est la couleur qu'un utilisateur choisira en premier. Aucune contrainte sur la palette ne répare cela sans interdire le bleu ; la réparation est géométrique : `outline-offset-2` intercale deux pixels de fond de grille entre la bordure et le contour de focus. Ce qui doit tenir devient alors « l'accent tranche sur la gouttière », ce qui est testé, plutôt que « l'accent tranche sur les huit couleurs », ce qui est faux et le restera.
+
+### Replier un pane sans arrêter son terminal
+
+Un pane peut quitter la grille pour un onglet dans une barre en bas, son shell continuant de tourner. Quatre choix portent la fonctionnalité, et le premier n'est pas cosmétique.
+
+**Un pane replié est déplacé hors écran, pas masqué.** `display: none` est ce que fait déjà le zoom pour les panes cachés, et c'est précisément ce qu'il ne faut pas faire ici : un conteneur en `display: none` rapporte une boîte de 0 × 0, le `ResizeObserver` de `PaneView` ignore cette taille (à raison — redimensionner un pty à zéro reflow son scrollback), et c'est ce même observateur qui déclenche le premier `pane:spawn`. Un pane déclaré `"collapsed": true` dans le fichier n'aurait donc jamais démarré son shell : le tunnel censé tourner tout l'après-midi ne serait jamais lancé. Il est donc positionné en `fixed` à une taille de garde (720 × 420), hors du flux — il ne consomme aucune cellule de grille — et hors du conteneur scrollable, donc sans rien y ajouter en débordement. Le décalage est négatif en x, ce qui ne crée pas de défilement en LTR, et `body { overflow: hidden }` ferme le sujet.
+
+**Il porte `inert`.** Hors écran mais mis en page, le textarea d'xterm reste focalisable et annoncé aux lecteurs d'écran. `inert` retire les deux, y compris le focus programmatique — d'où la règle inverse dans `focusPane`, qui déplie avant de focaliser. `selectPane`, lui, ne déplie pas : sélectionner une ligne dans l'éditeur de layout veut dire « éditer ce pane », pas traîner un job de fond sur la grille.
+
+**Le pli est un état de vue, `collapsed` est un défaut.** Le champ du fichier n'est lu qu'à l'ouverture du workspace ; replier ensuite ne salit pas le layout et ne déclenche pas de sauvegarde. `replaceLayout` conserve l'état courant des panes déjà connus et n'applique `collapsed` qu'aux panes que le layout vient d'introduire : sans cette règle, recharger un fichier modifié à l'extérieur replierait un pane que l'utilisateur venait d'ouvrir, exactement le travers que le rechargement évite déjà côté processus. Les flèches de navigation, elles, parcourent `visiblePanes` : `neighbourIndex` raisonne en lignes de `columns` cases et un pane replié n'en occupe aucune.
+
+**La dernière commande est lue à l'écran, pas dans les frappes.** L'onglet affiche « nom du pane — dernière commande », et la seconde moitié ne peut pas venir du layout, qui ne connaît que l'autolaunch. Accumuler les frappes est l'implémentation évidente et elle est fausse deux fois : la complétion par tabulation réécrit la ligne, et le rappel d'historique n'envoie que `\x1b[A`. `command-capture.ts` lit donc la ligne du curseur après coup, en index *absolu* de buffer (stable quand la ligne remonte dans le scrollback), et n'utilise les frappes que pour retenir la colonne où l'entrée commence — la première touche d'une ligne arrive alors que le curseur est encore juste après le prompt. Cette ancre est **liée à sa ligne logique** : avec le suivi de focus activé, un terminal émet `\x1b[I` de lui-même, et le tout premier arrive sur un pane encore vide — mesuré, et c'est ce qui faisait sortir la première commande capturée sous la forme `PS C:\…\mtc> echo bonjour-monde`, prompt compris.
 
 ---
 
@@ -224,6 +236,7 @@ const PaneSchema = z.object({
   shell:   z.enum(['pwsh','powershell','cmd','bash']).optional(),
   command: z.string().optional(),            // absent = shell nu, en attente
   color:   z.enum(PANE_COLORS).optional(),   // absent = bordure du thème
+  collapsed: z.boolean().optional(),         // absent = démarre sur la grille
 })
 
 const LayoutSchema = z.object({
@@ -536,11 +549,12 @@ MyTerm/
         │   ├── registry.ts      # Map<paneId, Terminal> — hors React
         │   ├── create-terminal.ts
         │   ├── key-chords.ts    # qui possède une touche — prédicats purs
+        │   ├── command-capture.ts # dernière commande lancée, lue à l'écran
         │   └── theme.ts         # palette → ITheme
         ├── theme/palette.ts     # source unique light/dark
         ├── components/
         │   ├── ProjectPicker/
-        │   ├── Grid/            # GridView, PaneView, PaneBadge, PaneHeader
+        │   ├── Grid/            # GridView, PaneView, PaneBadge, PaneHeader, CollapsedBar
         │   ├── LayoutEditor/
         │   ├── TrustDialog/
         │   └── ui/              # primitives partagées

@@ -63,6 +63,19 @@ export const PaneSchema = z.object({
    * only value that follows light/dark instead of standing out from it.
    */
   color: z.enum(PANE_COLORS).optional(),
+  /**
+   * Start this pane folded into the bottom bar rather than on the grid.
+   *
+   * A *default*, not a state: the file says where the pane starts, and folding
+   * or unfolding it afterwards is view state that never comes back here
+   * (ADR-003 — the window decides what you look at, the file decides what
+   * exists). Written for the pane that has to run and does not have to be
+   * watched: a tunnel, a watcher, a queue worker.
+   *
+   * `.optional()` rather than `.default(false)`: a pane that was never folded
+   * must not gain a `"collapsed": false` in everyone's diff.
+   */
+  collapsed: z.boolean().optional(),
 })
 
 export const DefaultsSchema = z.object({

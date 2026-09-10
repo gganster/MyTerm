@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
 import type { Pane } from '@shared/schema/layout'
 import { focusPane } from '../../pane-focus'
+import { createCommandCapture } from '../../terminal/command-capture'
 import { createTerminal } from '../../terminal/create-terminal'
 import { disposeTerminal, getTerminal, registerTerminal } from '../../terminal/registry'
-import { selectIsFocused, selectIsHidden, useStore } from '../../store'
+import { selectIsCollapsed, selectIsFocused, selectIsHidden, useStore } from '../../store'
 import { paneBorderColor } from '../../theme/palette'
 import { PaneHeader } from './PaneHeader'
 
@@ -27,6 +28,7 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
   // this one (ARCHI § State Management).
   const isFocused = useStore(selectIsFocused(paneId))
   const isHidden = useStore(selectIsHidden(paneId))
+  const isCollapsed = useStore(selectIsCollapsed(paneId))
   const isZoomed = useStore((state) => state.zoomedPaneId === paneId)
   const setPaneStatus = useStore((state) => state.setPaneStatus)
   // The colour is a *theme-dependent* value, so it is resolved here rather than
@@ -61,8 +63,21 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
       )
     })
 
+    // The autolaunch command is written straight to the pty by the main
+    // process, so the capture below never sees it. Seeding it here is what
+    // makes a pane that has run one command since it started — a tunnel, the
+    // whole point of folding — able to say so. Re-seeded on every restart,
+    // which is exactly when the running command changes.
+    const { command } = useStore.getState().layout.panes.find((p) => p.id === paneId) ?? {}
+    if (command) useStore.getState().setPaneLastCommand(paneId, command)
+
+    const capture = createCommandCapture(handle.terminal, (submitted) => {
+      useStore.getState().setPaneLastCommand(paneId, submitted)
+    })
+
     handle.terminal.onData((data) => {
       void window.myterm.pane.write(paneId, data)
+      capture.onData(data)
     })
 
     let spawned = false
@@ -109,6 +124,7 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
       unsubscribeData()
       unsubscribeStatus()
       unsubscribeExit()
+      capture.dispose()
       void window.myterm.pane.kill(paneId)
       disposeTerminal(paneId)
     }
@@ -117,9 +133,12 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
   }, [paneId])
 
   // Coming back from zoom, the box changes while this pane is display:none, so
-  // ResizeObserver never fires. Refit explicitly once it is visible again.
+  // ResizeObserver never fires. Refit explicitly once it is visible again —
+  // and on unfolding too, where the pane goes from its holding size straight
+  // to a grid cell.
+  const offGrid = isHidden || isCollapsed
   useEffect(() => {
-    if (isHidden) return
+    if (offGrid) return
     const handle = getTerminal(paneId)
     if (!handle) return
     const id = window.setTimeout(() => {
@@ -129,14 +148,21 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
       void window.myterm.pane.resize(paneId, dims.cols, dims.rows)
     }, 30)
     return () => window.clearTimeout(id)
-  }, [isHidden, paneId])
+  }, [offGrid, paneId])
 
   return (
     <section
       data-pane={paneId}
       data-focused={isFocused || undefined}
       data-zoomed={isZoomed || undefined}
+      data-collapsed={isCollapsed || undefined}
       data-pane-color={pane.color ?? undefined}
+      // A folded pane is off screen but still laid out, so its terminal is
+      // still focusable and still announced. `inert` closes both: the keyboard
+      // cannot land in a terminal nobody can see, and a screen reader is not
+      // handed six invisible panes. Programmatic focus is blocked too, which
+      // is why focusPane() unfolds before it focuses.
+      inert={isCollapsed}
       onMouseDown={() => focusPane(paneId)}
       // A coloured pane keeps its colour even while focused — losing it there
       // would blank the one pane you are looking at, which is precisely when
@@ -159,7 +185,19 @@ export function PaneView({ pane }: PaneViewProps): React.JSX.Element {
         // grid's own background between the two bands, which is what makes the
         // focus readable whatever colour the pane carries.
         borderColor && isFocused ? 'outline-2 outline-offset-2 outline-accent' : '',
-        isHidden ? 'hidden' : '',
+        // Folding parks the pane off screen at a *fixed size* rather than
+        // hiding it, and the difference is the whole feature. `display: none`
+        // reports a 0x0 box, so a pane folded from the file would never reach
+        // the branch below that spawns its shell — the tunnel that is supposed
+        // to run all afternoon would never start. Out of flow so it takes no
+        // grid cell, `fixed` so it is outside the scroll container entirely,
+        // and negative-x so it cannot extend anything: the document itself
+        // cannot scroll (`body { overflow: hidden }`).
+        isCollapsed
+          ? 'pointer-events-none fixed top-0 -left-[9999px] h-[420px] w-[720px]'
+          : isHidden
+            ? 'hidden'
+            : '',
       ].join(' ')}
     >
       <PaneHeader paneId={paneId} title={pane.title || pane.id} />

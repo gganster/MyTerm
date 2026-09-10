@@ -22,6 +22,7 @@ Pas de base de données, pas d'historique de sessions, pas d'émulation d'IDE. U
     { "id": "claude-3", "title": "Claude · libre",   "command": "claude" },
     { "id": "web",  "title": "frontend", "cwd": "frontend", "command": "npm run dev", "color": "blue" },
     { "id": "api",  "title": "backend",  "cwd": "backend",  "command": "npm run dev", "color": "green" },
+    { "id": "tunnel", "title": "tunnel", "command": "cloudflared tunnel run app", "collapsed": true },
     { "id": "free", "title": "scratch" }
   ]
 }
@@ -55,6 +56,23 @@ Les panes suivants passent à la ligne. Quand les lignes ne tiennent plus en hau
 
 Le fichier se modifie à la main ou depuis l'éditeur intégré (bouton **Layout**). Une sauvegarde depuis l'application réécrit le fichier entier — le JSON est reformaté et les clés inconnues sont perdues — mais rien n'est écrit tant que vous n'avez rien modifié. Une édition externe lève une bannière plutôt que d'être appliquée dans votre dos.
 
+### Réduire un pane
+
+Un pane réduit quitte la grille et devient un onglet dans une barre en bas de la fenêtre, à la manière de la barre des tâches. **Son terminal continue de tourner** : le shell n'est ni tué ni suspendu, la commande poursuit son travail et la sortie continue de s'accumuler dans le scrollback.
+
+C'est fait pour le pane qui doit *tourner* sans avoir à être *surveillé* — un tunnel Cloudflare, un worker de file, un watcher. Il occupait une case entière pour une sortie que personne ne lit, et le fermer n'est pas une option puisque le processus est justement ce qu'on veut garder.
+
+| | |
+|---|---|
+| bouton `⤓` dans l'en-tête du pane | le réduire |
+| `Ctrl+Shift+M` | réduire ou restaurer le pane focalisé |
+| clic sur son onglet en bas | le restaurer |
+| `Ctrl+Shift+1..9` | restaurer et focaliser le n-ième pane, même réduit |
+
+Le survol d'un onglet affiche **le nom du pane et sa dernière commande lancée** — la commande d'autolaunch au démarrage, puis ce que vous avez tapé ensuite. L'onglet porte aussi la couleur du pane et son badge d'activité, et un pane *terminé* y passe en rouge : c'est le seul endroit où l'état « terminé » est mis en avant, parce qu'un tunnel mort derrière un onglet discret est précisément ce que cette fonctionnalité introduirait sinon.
+
+`"collapsed": true` dans le fichier ouvre le pane directement réduit — la case **Démarrer réduit** de l'éditeur intégré écrit exactement ce champ. C'est un *défaut*, pas un état : réduire ou déplier ensuite ne touche pas au fichier et ne marque pas le workspace comme modifié.
+
 ## Installation
 
 Téléchargez `MyTerm-<version>-setup.exe` depuis les [Releases](https://github.com/gganster/myterm/releases).
@@ -83,8 +101,9 @@ Peu importe la porte : le [contrôle de confiance](#sécurité) s'applique à l'
 | `Ctrl+Shift+C` | copier la sélection du pane focalisé |
 | `Ctrl+Entrée` | insérer un saut de ligne **sans** exécuter |
 | `Ctrl+Shift+Z` | agrandir / réduire le pane focalisé |
+| `Ctrl+Shift+M` | replier le pane focalisé dans la barre du bas, ou l'en sortir |
 | `Ctrl+Shift+←↑→↓` | déplacer le focus d'un terminal à l'autre |
-| `Ctrl+Shift+1..9` | focus direct sur le n-ième pane |
+| `Ctrl+Shift+1..9` | focus direct sur le n-ième pane, réduit ou non |
 | `Ctrl+S` | forcer la sauvegarde du layout |
 | `Échap` | réduire le pane agrandi |
 

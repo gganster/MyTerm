@@ -56,6 +56,7 @@ export function updatePane(layout: Layout, paneId: string, patch: Partial<Pane>)
       if (!next.command) delete next.command
       if (!next.shell) delete next.shell
       if (!next.color) delete next.color
+      if (!next.collapsed) delete next.collapsed
       return next
     }),
   })
@@ -87,7 +88,9 @@ export function movePane(layout: Layout, paneId: string, direction: 'up' | 'down
  * Which panes must restart for a new layout to take effect.
  *
  * Only the three fields that define the process. A renamed pane keeps running:
- * killing a dev server over a typo would be indefensible.
+ * killing a dev server over a typo would be indefensible — and so would
+ * killing it because someone ticked "start folded", which is the whole point
+ * of folding a pane rather than closing it.
  */
 export function panesNeedingRestart(previous: Layout, next: Layout): string[] {
   const before = new Map(previous.panes.map((pane) => [pane.id, pane]))

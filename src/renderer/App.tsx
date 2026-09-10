@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { CollapsedBar } from './components/Grid/CollapsedBar'
 import { GridView } from './components/Grid/GridView'
 import { LayoutEditor } from './components/LayoutEditor/LayoutEditor'
 import { ProjectPicker } from './components/ProjectPicker/ProjectPicker'
@@ -176,8 +177,17 @@ export function App(): React.JSX.Element {
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        <main className="min-h-0 flex-1">
-          <GridView />
+        {/* The folded panes belong to the pane area, not to the window: the bar
+            stops at the layout editor's edge and sits above the status bar,
+            which is the app's own footer and stays clickable-free. */}
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* The grid keeps its own `h-full`; this wrapper is what gives that
+              percentage something definite to resolve against once the bar
+              takes its share of the column. */}
+          <div className="min-h-0 flex-1">
+            <GridView />
+          </div>
+          <CollapsedBar />
         </main>
         {editorOpen ? (
           <LayoutEditor

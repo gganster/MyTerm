@@ -26,11 +26,15 @@ export function GridView(): React.JSX.Element {
   const generation = useStore(selectGeneration)
   const paneEpochs = useStore((state) => state.paneEpochs)
   const zoomedPaneId = useStore((state) => state.zoomedPaneId)
+  const collapsedCount = useStore((state) => state.collapsedPaneIds.length)
   const setColumns = useStore((state) => state.setColumns)
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const paneCount = panes.length
+  // Folded panes are positioned out of flow, so they claim no track and must
+  // not be counted when deciding how many fit on a line.
+  const paneCount = Math.max(panes.length - collapsedCount, 1)
   const zoomed = zoomedPaneId !== null
+  const allFolded = collapsedCount >= panes.length
 
   // A layout effect, not a passive one: it runs before paint and before the
   // panes' own effects, so a pane never spawns its pty measured against a
@@ -105,6 +109,14 @@ export function GridView(): React.JSX.Element {
         // the key is stable and panes survive edits untouched.
         <PaneView key={`${generation}:${pane.id}:${paneEpochs[pane.id] ?? 0}`} pane={pane} />
       ))}
+      {/* Every pane folded is a legitimate state — a workspace of background
+          jobs — and it must not look like a workspace that failed to open. */}
+      {allFolded ? (
+        <p data-grid-empty className="m-auto max-w-80 text-center text-xs text-text-muted">
+          Tous les panes sont réduits et continuent de tourner. Cliquez un onglet
+          de la barre du bas pour en ramener un.
+        </p>
+      ) : null}
     </div>
   )
 }

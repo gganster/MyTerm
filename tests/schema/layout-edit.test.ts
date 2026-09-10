@@ -81,6 +81,25 @@ describe('updatePane', () => {
     const result = updatePane(base, 'a', { color: 'turquoise' } as never)
     expect(result.ok).toBe(false)
   })
+
+  it('marque un pane comme démarrant réduit', () => {
+    const result = updatePane(base, 'a', { collapsed: true })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.layout.panes[0]).toMatchObject({ collapsed: true })
+  })
+
+  it("efface la clé « collapsed » quand elle repasse à faux, plutôt que d'écrire false", () => {
+    // Le fichier est versionné : un « collapsed: false » sur chaque pane
+    // jamais réduit polluerait le diff de tout le monde.
+    const folded = updatePane(base, 'a', { collapsed: true })
+    expect(folded.ok).toBe(true)
+    if (!folded.ok) return
+    const unfolded = updatePane(folded.layout, 'a', { collapsed: false })
+    expect(unfolded.ok).toBe(true)
+    if (!unfolded.ok) return
+    expect(unfolded.layout.panes[0]).not.toHaveProperty('collapsed')
+  })
 })
 
 describe('movePane', () => {
@@ -113,6 +132,13 @@ describe('movePane', () => {
 })
 
 describe('panesNeedingRestart', () => {
+  it('ignore un pane replié : le terminal continue de tourner derrière la barre', () => {
+    const folded = updatePane(base, 'a', { collapsed: true })
+    expect(folded.ok).toBe(true)
+    if (!folded.ok) return
+    expect(panesNeedingRestart(base, folded.layout)).toEqual([])
+  })
+
   it('ignore un changement de couleur : repeindre un contour ne tue pas un shell', () => {
     const recolored = updatePane(base, 'a', { color: 'purple' })
     expect(recolored.ok).toBe(true)
