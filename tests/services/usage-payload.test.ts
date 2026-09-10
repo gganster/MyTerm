@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isTokenExpired, parseUsagePayload } from '../../src/main/services/usage'
+import { isTokenExpired, parseClaudePayload } from '../../src/main/services/usage-parse'
 
 /**
  * The two decisions that turn a raw HTTP answer into "we know the quota" or
@@ -10,40 +10,40 @@ import { isTokenExpired, parseUsagePayload } from '../../src/main/services/usage
 
 const NOW = Date.parse('2026-08-22T04:00:00Z')
 
-describe('parseUsagePayload', () => {
+describe('parseClaudePayload', () => {
   it('reads the payload the endpoint actually returns', () => {
-    const windows = parseUsagePayload({
+    const windows = parseClaudePayload({
       five_hour: { utilization: 40.0, resets_at: '2026-08-22T05:30:00.451745+00:00' },
       seven_day: { utilization: 59.0, resets_at: '2026-08-23T13:00:00.451766+00:00' },
       seven_day_opus: null,
     })
     expect(windows).not.toBeNull()
-    expect(windows!.fiveHour.utilization).toBe(40)
-    expect(windows!.sevenDay.utilization).toBe(59)
-    expect(windows!.fiveHour.resetsAt).toBe(Date.parse('2026-08-22T05:30:00.451Z'))
+    expect(windows!.session.utilization).toBe(40)
+    expect(windows!.week.utilization).toBe(59)
+    expect(windows!.session.resetsAt).toBe(Date.parse('2026-08-22T05:30:00.451Z'))
   })
 
   // The bug this guard exists for: a 200 that parses as JSON but says nothing
   // we understand must be a failure, not a quota that happens to be blank.
   it('returns null when neither window can be read', () => {
-    expect(parseUsagePayload({})).toBeNull()
-    expect(parseUsagePayload(null)).toBeNull()
-    expect(parseUsagePayload('ok')).toBeNull()
-    expect(parseUsagePayload({ fiveHour: { utilization: 40 } })).toBeNull()
-    expect(parseUsagePayload({ five_hour: {}, seven_day: {} })).toBeNull()
+    expect(parseClaudePayload({})).toBeNull()
+    expect(parseClaudePayload(null)).toBeNull()
+    expect(parseClaudePayload('ok')).toBeNull()
+    expect(parseClaudePayload({ session: { utilization: 40 } })).toBeNull()
+    expect(parseClaudePayload({ five_hour: {}, seven_day: {} })).toBeNull()
   })
 
   // An account without a weekly window is a real answer, not a broken one.
   it('accepts a payload where only one window carries a value', () => {
-    const windows = parseUsagePayload({ five_hour: { utilization: 12 }, seven_day: null })
+    const windows = parseClaudePayload({ five_hour: { utilization: 12 }, seven_day: null })
     expect(windows).not.toBeNull()
-    expect(windows!.fiveHour.utilization).toBe(12)
-    expect(windows!.sevenDay.utilization).toBeNull()
+    expect(windows!.session.utilization).toBe(12)
+    expect(windows!.week.utilization).toBeNull()
   })
 
   it('treats a zero quota as a real reading, not as an absent one', () => {
-    const windows = parseUsagePayload({ five_hour: { utilization: 0 }, seven_day: null })
-    expect(windows?.fiveHour.utilization).toBe(0)
+    const windows = parseClaudePayload({ five_hour: { utilization: 0 }, seven_day: null })
+    expect(windows?.session.utilization).toBe(0)
   })
 })
 

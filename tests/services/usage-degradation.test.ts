@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { snapshotAfterFailure } from '../../src/main/services/usage'
+import { snapshotAfterFailure } from '../../src/main/services/usage-poller'
 import type { UsageSnapshot } from '@shared/ipc-contract'
 
 const NOW = Date.parse('2026-08-22T04:00:00Z')
@@ -9,8 +9,8 @@ function good(fetchedAt: number): UsageSnapshot {
     ok: true,
     stale: false,
     fetchedAt,
-    fiveHour: { utilization: 40, resetsAt: NOW + 3 * 3_600_000 },
-    sevenDay: { utilization: 59, resetsAt: NOW + 30 * 3_600_000 },
+    session: { utilization: 40, resetsAt: NOW + 3 * 3_600_000 },
+    week: { utilization: 59, resetsAt: NOW + 30 * 3_600_000 },
   }
 }
 
@@ -19,8 +19,8 @@ describe('snapshotAfterFailure', () => {
     const snapshot = snapshotAfterFailure(null, 'no-credentials', NOW)
     expect(snapshot.ok).toBe(false)
     expect(snapshot.error).toBe('no-credentials')
-    expect(snapshot.fiveHour.utilization).toBeNull()
-    expect(snapshot.sevenDay.utilization).toBeNull()
+    expect(snapshot.session.utilization).toBeNull()
+    expect(snapshot.week.utilization).toBeNull()
   })
 
   // A dropped request must not blank a number that is still essentially true.
@@ -29,8 +29,8 @@ describe('snapshotAfterFailure', () => {
     expect(snapshot.ok).toBe(true)
     expect(snapshot.stale).toBe(true)
     expect(snapshot.error).toBe('network')
-    expect(snapshot.fiveHour.utilization).toBe(40)
-    expect(snapshot.sevenDay.utilization).toBe(59)
+    expect(snapshot.session.utilization).toBe(40)
+    expect(snapshot.week.utilization).toBe(59)
   })
 
   it('keeps the instant the values were measured, not the instant of the failure', () => {
@@ -43,7 +43,7 @@ describe('snapshotAfterFailure', () => {
     const expired = snapshotAfterFailure(good(NOW - 15 * 60_000), 'http-429', NOW)
     expect(expired.ok).toBe(false)
     expect(expired.stale).toBe(false)
-    expect(expired.fiveHour.utilization).toBeNull()
+    expect(expired.session.utilization).toBeNull()
   })
 
   it('does not mistake an already-stale reading for a fresh baseline', () => {

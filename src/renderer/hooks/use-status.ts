@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { UsageSnapshot } from '@shared/ipc-contract'
+import type { UsageByProvider } from '@shared/ipc-contract'
 import type { SystemLoad } from '@shared/system-load'
 
 /**
@@ -15,14 +15,14 @@ import type { SystemLoad } from '@shared/system-load'
 const COUNTDOWN_TICK_MS = 20_000
 
 export interface StatusReadings {
-  usage: UsageSnapshot | null
+  usage: UsageByProvider | null
   load: SystemLoad | null
   /** Clock used to render countdowns, refreshed on its own slow tick. */
   now: number
 }
 
 export function useStatus(): StatusReadings {
-  const [usage, setUsage] = useState<UsageSnapshot | null>(null)
+  const [usage, setUsage] = useState<UsageByProvider | null>(null)
   const [load, setLoad] = useState<SystemLoad | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
@@ -32,10 +32,11 @@ export function useStatus(): StatusReadings {
 
     // Pull as well as subscribe: the main process starts polling long before
     // this component mounts, and a push emitted in between would be lost.
-    void window.myterm.status.getUsage().then((snapshot) => {
+    void window.myterm.status.getUsage().then((pulled) => {
       if (cancelled) return
-      // Never overwrite a push that won the race — it is strictly newer.
-      setUsage((current) => current ?? snapshot)
+      // Never overwrite a push that won the race — it is strictly newer, and
+      // it carries both providers, so there is nothing to merge in from here.
+      setUsage((current) => current ?? pulled)
     })
 
     return () => {

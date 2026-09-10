@@ -51,6 +51,21 @@ export interface ChromePalette {
   statusAttention: string
   statusIdle: string
   statusExited: string
+  /**
+   * The two quota bars, coloured by *whose* quota they are.
+   *
+   * The footer used to name each agent in words; with two agents and four
+   * gauges the words cost more room than the bar itself, so the name became a
+   * logo and the fill became the second half of that identity (see StatusBar).
+   *
+   * Which means the fill can no longer carry severity as well: `warn` is left
+   * to the number, and only `critical` overrides the identity — at 90 % it no
+   * longer matters whose quota it is. Orange and amber are the same hue family
+   * and no orange sits far from `statusAttention`, so the warn step is carried
+   * by the number's colour *and* its weight rather than by hue alone.
+   */
+  quotaClaude: string
+  quotaCodex: string
 }
 
 /**
@@ -83,6 +98,13 @@ export const light: Palette = {
     statusAttention: '#bc4c00',
     statusIdle: '#8c959f',
     statusExited: '#a40e26',
+    // 5.2:1 on the footer and 4.5:1 on the gauge track — a bar this thin has
+    // to clear WCAG's 3:1 for graphical objects with room to spare.
+    quotaClaude: '#c2410c',
+    // Deliberately the same green as `statusRunning` rather than a second one
+    // a few degrees away: two greens nobody can tell apart is how a palette
+    // rots. Codex is green, and green already means nominal here.
+    quotaCodex: '#1a7f37',
   },
   ansi: {
     background: '#ffffff',
@@ -142,6 +164,11 @@ export const dark: Palette = {
     statusAttention: '#f0883e',
     statusIdle: '#6e7681',
     statusExited: '#ff7b72',
+    // Pulled toward coral rather than sitting on `statusAttention`: identical
+    // to the amber it would be indistinguishable from the warn number, and the
+    // point of this colour is to say "Claude", not "attention".
+    quotaClaude: '#ef8354',
+    quotaCodex: '#3fb950',
   },
   ansi: {
     background: '#16181d',

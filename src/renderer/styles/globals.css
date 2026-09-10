@@ -23,6 +23,8 @@
   --color-status-attention: var(--mt-status-attention, #bc4c00);
   --color-status-idle: var(--mt-status-idle, #8c959f);
   --color-status-exited: var(--mt-status-exited, #a40e26);
+  --color-quota-claude: var(--mt-quota-claude, #c2410c);
+  --color-quota-codex: var(--mt-quota-codex, #1a7f37);
 }
 
 html,

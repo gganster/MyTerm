@@ -3,6 +3,7 @@ import {
   formatAge,
   formatCountdown,
   formatUtilization,
+  formatWindowLabel,
   normaliseWindow,
   quotaTone,
   toEpochMs,
@@ -136,5 +137,26 @@ describe('formatAge', () => {
   // A clock that jumped backwards must not produce "-3 min" in a tooltip.
   it('clamps a reading dated in the future to zero', () => {
     expect(formatAge(now + 60_000, now)).toBe('0 s')
+  })
+})
+
+describe('formatWindowLabel', () => {
+  it('nomme une fenêtre par sa durée déclarée', () => {
+    expect(formatWindowLabel(5 * 3600)).toBe('5 h')
+    expect(formatWindowLabel(7 * 24 * 3600)).toBe('7 j')
+    expect(formatWindowLabel(30 * 24 * 3600)).toBe('30 j')
+  })
+
+  it('bascule en jours seulement au-delà de 48 h', () => {
+    // Une fenêtre d'un jour se lit mieux en heures : « 24 h » est la durée que
+    // l'API déclare, « 1 j » invite à la confondre avec la fenêtre longue.
+    expect(formatWindowLabel(24 * 3600)).toBe('24 h')
+    expect(formatWindowLabel(48 * 3600)).toBe('2 j')
+  })
+
+  it("n'invente pas de durée quand le fournisseur n'en donne pas", () => {
+    expect(formatWindowLabel(undefined)).toBe('—')
+    expect(formatWindowLabel(0)).toBe('—')
+    expect(formatWindowLabel(Number.NaN)).toBe('—')
   })
 })

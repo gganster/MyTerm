@@ -15,7 +15,7 @@ import type {
   OpenWorkspaceResult,
   SaveLayoutResult,
   TrustDecision,
-  UsageSnapshot,
+  UsageByProvider,
 } from '@shared/ipc-contract'
 import type { SystemLoad } from '@shared/system-load'
 import { DisplayPreferencesSchema } from '@shared/schema/preferences'
@@ -240,10 +240,10 @@ export function registerIpcHandlers(): void {
   // Both are push streams with a pull companion: the renderer mounts long after
   // the main process starts, and a push emitted before its listener attached
   // would leave the bar stuck on "—" until the next tick.
-  initUsagePolling((snapshot) => push(IPC.statusUsage, snapshot))
+  initUsagePolling((usage) => push(IPC.statusUsage, usage))
   initLoadMonitor((load) => push(IPC.statusLoad, load))
 
-  ipcMain.handle(IPC.statusUsageGet, (): UsageSnapshot => getUsage())
+  ipcMain.handle(IPC.statusUsageGet, (): UsageByProvider => getUsage())
   ipcMain.handle(IPC.statusLoadGet, (): SystemLoad => getSystemLoad())
 
   // ---- external editors ----------------------------------------------------

@@ -3,8 +3,9 @@ out/
 dist/
 release/
 
-# APEX run state (local bookkeeping, not project source)
+# Agent tooling run state (local bookkeeping, not project source)
 .agents/
+.claude/
 
 # Editors / OS
 .vscode/

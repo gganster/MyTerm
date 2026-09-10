@@ -1,11 +1,21 @@
 /**
- * Claude usage quota: shape and the pure logic around it.
+ * Agent usage quota: shape and the pure logic around it.
  *
- * Two windows are surfaced, the two the user actually watches: the rolling
- * 5-hour session and the rolling 7-day week. Everything here is pure so the
+ * Two windows are surfaced per provider, the two anyone actually watches: a
+ * short rolling session and a long rolling week. Everything here is pure so the
  * main process (which parses the API response) and the renderer (which renders
  * it) agree on a single set of rules, and so both are testable without Electron.
  */
+
+/**
+ * The coding agents whose quota the status bar tracks.
+ *
+ * A closed list, and the key of every per-provider record in the app: adding a
+ * third agent then fails to compile everywhere one is missing, which is the
+ * only way a palette entry, a poller and a bar stay in step.
+ */
+export const QUOTA_PROVIDERS = ['claude', 'codex'] as const
+export type QuotaProvider = (typeof QUOTA_PROVIDERS)[number]
 
 /** One rate-limit window as the status bar needs it. */
 export interface QuotaWindow {
@@ -13,6 +23,16 @@ export interface QuotaWindow {
   utilization: number | null
   /** Epoch ms at which the window rolls over, or `null` if the API omitted it. */
   resetsAt: number | null
+  /**
+   * Length of the window in seconds, when the provider says so.
+   *
+   * The label above each gauge is derived from this rather than hard-coded:
+   * Anthropic's two windows are always 5 h and 7 d, but a Codex plan declares
+   * its own — this account has a single 7-day window and no session window at
+   * all. A bar labelled "session" over a weekly figure would be a lie the user
+   * has no way to catch.
+   */
+  windowSeconds?: number
 }
 
 export type QuotaTone = 'unknown' | 'ok' | 'warn' | 'critical'
@@ -37,19 +57,31 @@ export function toEpochMs(value: unknown): number | null {
  * at zero reads as "quota intact", which is the opposite of "we have no idea"
  * and is exactly the wrong thing to tell someone about to start a long run.
  */
-export function normaliseWindow(utilizationRaw: unknown, resetsAtRaw: unknown): QuotaWindow {
+export function normaliseWindow(
+  utilizationRaw: unknown,
+  resetsAtRaw: unknown,
+  windowSecondsRaw?: unknown,
+): QuotaWindow {
   const resetsAt = toEpochMs(resetsAtRaw)
+  const windowSeconds =
+    typeof windowSecondsRaw === 'number' && Number.isFinite(windowSecondsRaw) && windowSecondsRaw > 0
+      ? { windowSeconds: windowSecondsRaw }
+      : {}
   // An allowlist, not a null check. `Number` coerces `true`, `[]` and `''` to a
   // number without complaining, and every one of them would land on 0 — a
   // full-quota bar drawn for a field the API left blank, which is the one lie
   // this type exists to prevent.
   const isNumeric = typeof utilizationRaw === 'number' || typeof utilizationRaw === 'string'
   if (!isNumeric || (typeof utilizationRaw === 'string' && utilizationRaw.trim() === '')) {
-    return { utilization: null, resetsAt }
+    return { utilization: null, resetsAt, ...windowSeconds }
   }
   const numeric = Number(utilizationRaw)
-  if (!Number.isFinite(numeric)) return { utilization: null, resetsAt }
-  return { utilization: Math.max(0, Math.min(100, Math.round(numeric))), resetsAt }
+  if (!Number.isFinite(numeric)) return { utilization: null, resetsAt, ...windowSeconds }
+  return {
+    utilization: Math.max(0, Math.min(100, Math.round(numeric))),
+    resetsAt,
+    ...windowSeconds,
+  }
 }
 
 /**
@@ -94,4 +126,20 @@ export function formatAge(fetchedAt: number, now: number): string {
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes} min`
   return `${Math.floor(minutes / 60)} h`
+}
+
+/**
+ * Short name for a window, from its own length.
+ *
+ * Deliberately the *duration* and not a role name. "session" and "semaine"
+ * were fine while one provider declared exactly two fixed windows; with a
+ * second provider that picks its own, the only label that cannot go stale is
+ * the one the provider hands us. Falls back to the position-free "—" rather
+ * than guessing.
+ */
+export function formatWindowLabel(windowSeconds: number | undefined): string {
+  if (!windowSeconds || !Number.isFinite(windowSeconds) || windowSeconds <= 0) return '—'
+  const hours = Math.round(windowSeconds / 3600)
+  if (hours < 48) return `${hours} h`
+  return `${Math.round(hours / 24)} j`
 }

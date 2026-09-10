@@ -128,11 +128,19 @@ Sans cela, MyTerm se rabat sur une heuristique de silence, nettement moins fiabl
 
 ### La barre de statut
 
-En bas de la fenêtre, en permanence et dans les deux vues : le quota Claude consommé sur la session de 5 h et sur la semaine glissante, avec le délai avant réinitialisation, puis la charge CPU et la mémoire vive de la machine.
+En bas de la fenêtre, en permanence et dans les deux vues : les quotas **Claude et Codex** consommés sur chaque fenêtre glissante, avec le délai avant réinitialisation, puis la charge CPU et la mémoire vive de la machine.
 
-Le quota est lu sur le même endpoint que `/usage`, avec le jeton de votre session Claude Code locale — si vous n'en avez pas, la barre le dit et n'affiche que le CPU et la RAM. La jauge reste grise jusqu'à 75 % de consommation, passe à l'orange, puis au rouge à 90 % : la couleur ne sert qu'à alerter. Une valeur inconnue s'affiche `—`, jamais `0 %`.
+Chaque agent est repéré par son logo plutôt que par son nom — deux noms écrits prenaient plus de place que les jauges — et par la couleur de ses barres : **Claude en orange, Codex en vert**. Survolez un logo ou une jauge pour retrouver le nom en toutes lettres.
 
-L'endpoint est partagé avec la statusline de Claude Code et tout overlay d'usage que vous faites tourner : MyTerm l'interroge toutes les 2 minutes et recule en cas de limitation. Si un relevé échoue, le dernier connu reste affiché avec un `⋯` pendant 15 minutes plutôt que de vider la barre.
+| | |
+|---|---|
+| `5 h`, `7 j` | la durée de la fenêtre, telle que le fournisseur la déclare |
+| `↻ 4 j 2 h` | ce qu'il reste avant sa réinitialisation |
+| barre rouge | plus de 90 % consommé — le seul cas où la couleur du fournisseur cède |
+
+Les quotas sont lus avec le jeton de vos sessions locales : `~/.claude/.credentials.json` pour Claude, `~/.codex/auth.json` pour Codex. Si l'une des deux CLI n'est pas connectée sur cette machine, la barre le dit pour celle-là et continue d'afficher l'autre. Un compte n'affiche que les fenêtres qu'il a réellement : un plan Codex sans limite de session ne montre que sa semaine.
+
+Les deux endpoints sont partagés avec les CLI elles-mêmes : MyTerm les interroge toutes les 2 minutes et recule en cas de limitation. Si un relevé échoue, le dernier connu reste affiché avec un `⋯` pendant 15 minutes plutôt que de vider la barre. Le côté ChatGPT refuse occasionnellement une requête au titre de sa protection anti-bot ; la barre le signale et réessaie d'elle-même dans les 20 secondes.
 
 ## Sécurité
 

@@ -26,7 +26,7 @@ import type {
   SaveLayoutResult,
   ThemeMode,
   TrustDecision,
-  UsageSnapshot,
+  UsageByProvider,
 } from '@shared/ipc-contract'
 import type { SystemLoad } from '@shared/system-load'
 
@@ -88,9 +88,9 @@ const api = {
 
   /** Status bar. Read-only: nothing here lets the renderer ask for an action. */
   status: {
-    getUsage: (): Promise<UsageSnapshot> => ipcRenderer.invoke(IPC.statusUsageGet),
-    onUsage: (listener: (snapshot: UsageSnapshot) => void): (() => void) =>
-      subscribe<UsageSnapshot>(IPC.statusUsage, listener),
+    getUsage: (): Promise<UsageByProvider> => ipcRenderer.invoke(IPC.statusUsageGet),
+    onUsage: (listener: (usage: UsageByProvider) => void): (() => void) =>
+      subscribe<UsageByProvider>(IPC.statusUsage, listener),
     getLoad: (): Promise<SystemLoad> => ipcRenderer.invoke(IPC.statusLoadGet),
     onLoad: (listener: (load: SystemLoad) => void): (() => void) =>
       subscribe<SystemLoad>(IPC.statusLoad, listener),

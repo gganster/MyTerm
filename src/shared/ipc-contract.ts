@@ -1,5 +1,5 @@
 import type { PaneStatus } from './pane-status'
-import type { QuotaWindow } from './quota'
+import type { QuotaProvider, QuotaWindow } from './quota'
 import type { SystemLoad } from './system-load'
 
 /**
@@ -125,11 +125,13 @@ export type OpenWorkspaceResult =
 export type TrustDecision = 'approve' | 'open-without-executing' | 'cancel'
 
 /**
- * Claude quota as pushed to the status bar.
+ * One agent's quota as pushed to the status bar.
  *
- * Note what is *not* here: no token, no account identifier, no file path. The
- * OAuth credential is read in the main process and never leaves it; a failure
- * is reduced to the coarse `error` code below, because this payload reaches the
+ * Note what is *not* here: no token, no account identifier, no e-mail, no file
+ * path. Both providers' credentials are read in the main process and never
+ * leave it — the Codex endpoint in particular answers with the account's e-mail
+ * address, which is dropped there and never crosses this boundary. A failure is
+ * reduced to the coarse `error` code below, because this payload reaches the
  * renderer and, through it, anything the renderer logs.
  */
 export interface UsageSnapshot {
@@ -142,8 +144,17 @@ export interface UsageSnapshot {
   stale: boolean
   /** When the values it carries were actually measured. */
   fetchedAt: number
-  fiveHour: QuotaWindow
-  sevenDay: QuotaWindow
+  /**
+   * The short rolling window, and the long one.
+   *
+   * Named by role rather than by duration — they were `fiveHour` and `sevenDay`
+   * while Anthropic was the only provider, and those names became wrong the day
+   * a Codex plan turned up declaring a single 7-day window and no session at
+   * all. The real length travels in `QuotaWindow.windowSeconds`, which is what
+   * the label is drawn from.
+   */
+  session: QuotaWindow
+  week: QuotaWindow
   /**
    * Coarse reason for the last failure — `no-credentials`, `token-expired`,
    * `http-401`, `http-429`, `network`, `parse`… Never a message built from file
@@ -151,6 +162,16 @@ export interface UsageSnapshot {
    */
   error?: string
 }
+
+/**
+ * Every provider's snapshot, pushed together on `status:usage`.
+ *
+ * One payload rather than a channel each: the two pollers run on independent
+ * schedules and back off independently, so a renderer that subscribed per
+ * provider would have to merge them anyway — and would miss whichever arrived
+ * before it mounted.
+ */
+export type UsageByProvider = Record<QuotaProvider, UsageSnapshot>
 
 /** Payload of `status:load`. Declared in `./system-load` next to the arithmetic that produces it. */
 export type { SystemLoad }
