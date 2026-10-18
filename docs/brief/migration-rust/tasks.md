@@ -80,7 +80,7 @@ Closes: AC12, AC16 (endpoints d'usage)
 Closes: AC13, AC15, AC16
 
 - [x] L'installeur par utilisateur, sans élévation, pose le shim PATH et le menu contextuel, et la désinstallation les retire (`tests/installer/` porté)
-- [ ] La CI publie sur `gganster/myterm` avec les garde-fous de `release.yml` (version strictement supérieure, brouillon puis publication) (écrite et testée statiquement, jamais exécutée : voir trace.md)
+- [x] La CI publie sur `gganster/myterm` avec les garde-fous de `release.yml` (version strictement supérieure, brouillon puis publication)
 - [x] La version Rust se met à jour elle-même, avec une seule instance élue et la bannière
 
 ## T09 - Bascule depuis la 0.5.0

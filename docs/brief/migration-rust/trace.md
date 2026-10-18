@@ -74,3 +74,16 @@ Pas fait, et pourquoi :
 - Mise à jour d'une 0.5.0 réelle : elle passe par une release publiée sur `gganster/myterm` (action publique, `latest.yml` lu par la 0.5.0) ou par un installeur réel lancé sur cette machine, qui remplace la 0.5.0 installée (menu contextuel, PATH, raccourci, clé de désinstallation). Demande l'accord de l'utilisateur.
 - Relevé exact de la 0.5.0 (deuxième fenêtre) : lance le `MyTerm.exe` installé ; refusé en cours de session, donc non fait.
 - Deux semaines d'usage quotidien : ne peut pas se faire en une session.
+
+### T08 - clos (2026-10-18) / T09 - suite
+Accord de l'utilisateur (2026-10-18) : installer pour de vrai et publier ; **pas** lancer la 0.5.0 pour la mesure.
+Fait :
+- Sauvegarde de la 0.5.0 réelle (`backup-0.5.0.ps1` : 233 fichiers, 5 clés, PATH brut, raccourci, `preferences.json` → `..\backup-0.5.0-install`, restauration par `-Restore`).
+- Installeur réel lancé en silencieux sur la 0.5.0 : une seule entrée « Applications installées » (clé `bb20937c-…`, `MyTerm 0.6.0`), clé et cache electron-builder retirés, dossier d'installation réduit aux fichiers Rust, menu contextuel (2 verbes, `%V`), raccourci du menu Démarrer conservé, PATH (31 entrées conservées, 1 entrée MyTerm, type `REG_EXPAND_SZ`), `preferences.json` identique octet pour octet, `.updaterId` conservé, une 2e exécution est idempotente. Défaut trouvé et corrigé : l'installeur créait un raccourci Bureau que la 0.5.0 n'avait pas ; il n'en crée plus qu'à la première installation (raccourci retiré à la main).
+- Dépôt Git créé (branche orpheline `rust` de `gganster/MyTerm`, 2 commits). CI réelle : un premier échec utile (le test cwd dépendait du lecteur du processus : le runner est sur `D:`), corrigé en épinglant `C:\` dans le test et dans le générateur de fixtures ; puis CI verte (tests + installeur + artefact).
+- `release.yml` exécuté pour de vrai : à blanc (vert), puis publication : release `v0.6.0` (Latest), assets `MyTerm-0.6.0-setup.exe` (4 722 473 o) et `latest.yml`, publiée par la promotion du workflow. L'updater Rust interrogé sur le vrai canal GitHub : depuis 0.5.0 → `Ready 0.6.0` (sha512 vérifié), depuis 0.6.0 → rien (`examples/real_update.rs`).
+Reste pour T09 :
+- La mise à jour par l'updater Electron de la 0.5.0 elle-même n'a pas été exercée (cela demande de restaurer et lancer la 0.5.0 ; non autorisé). Elle est lue dans le code de `electron-updater` (T01) : `latest.yml` au même format, `sha512`, `/S --updated --force-run`, `/D=` accepté.
+- Non vérifiés : bouton épinglé de la barre des tâches, géométrie de fenêtre d'une 0.5.0 (fichier lu, pas de fenêtre ouverte).
+- Deuxième fenêtre : non démontrée meilleure (voir baseline.md §5) ; mesure exacte de la 0.5.0 non faite.
+- Deux semaines d'usage quotidien.
