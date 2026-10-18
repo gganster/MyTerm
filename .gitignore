@@ -1,17 +1,3 @@
-node_modules/
-out/
+target/
 dist/
-release/
-
-# Agent tooling run state (local bookkeeping, not project source)
-.agents/
 .claude/
-
-# Editors / OS
-.vscode/
-.idea/
-Thumbs.db
-*.log
-
-# MyTerm local overrides (see PRD open question)
-.myterm.local.json

@@ -1,0 +1,35 @@
+//! MyTerm, native port. T02: the pure core — files, preferences and trust, byte-compatible with 0.5.0.
+
+pub mod app;
+pub mod atomic;
+pub mod chords;
+pub mod collate;
+mod collate_table;
+pub mod cwd;
+pub mod editor;
+pub mod external_editor;
+pub mod grid;
+pub mod home;
+pub mod identity;
+pub mod instances;
+pub mod window_geometry;
+pub mod logo_icon;
+pub mod open;
+pub mod palette;
+pub mod path_key;
+pub mod platform;
+pub mod prefs_store;
+pub mod quota;
+pub mod system_load;
+pub mod usage;
+pub mod palette_chrome;
+pub mod schema;
+pub mod shell;
+pub mod status_bar;
+pub mod term;
+pub mod status;
+pub mod trust;
+pub mod ui;
+pub mod updater;
+pub mod view_state;
+pub mod workspace;

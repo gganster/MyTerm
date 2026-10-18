@@ -3,10 +3,10 @@ name: Release
 on:
   push:
     # Un push sur la branche par défaut publie, à condition que la version du
-    # package.json n'ait pas déjà une release publiée (voir l'étape « Gate »).
+    # Cargo.toml n'ait pas déjà une release publiée (voir l'étape « Gate »).
     #
     # Pas de déclencheur sur tag : le seul juge de la version est le
-    # package.json. Un tag `v0.2.0` poussé sur un arbre où package.json dit
+    # Cargo.toml. Un tag `v0.2.0` poussé sur un arbre où Cargo.toml dit
     # 0.1.0 ferait tourner un build complet pour republier 0.1.0 — c'est-à-dire
     # rien. Pour rejouer une publication, utiliser workflow_dispatch.
     branches:
@@ -38,8 +38,7 @@ concurrency:
 
 jobs:
   build:
-    # Windows-only by design: the MVP targets Windows 11 (PRD), and the NSIS
-    # target cannot be produced elsewhere.
+    # Windows-only by design: the target is Windows 11 and the installer is NSIS.
     runs-on: windows-latest
 
     steps:
@@ -47,45 +46,40 @@ jobs:
         with:
           # Rien ici ne pousse avec git, et le token du job a les droits
           # d'écriture : le laisser dans .git/config pour toute la durée du job,
-          # `npm ci` et ses scripts de cycle de vie compris, ne sert à rien.
+          # `cargo` et `build.rs` compris, ne sert à rien.
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+      # La chaîne de build est celle de `rust-toolchain.toml` : rustup l'installe seul au premier appel.
+      - name: Toolchain
+        shell: bash
+        run: rustup show
 
-      # No native compilation happens here: node-pty ships N-API prebuilds and
-      # npmRebuild is off (ADR-002). If that ever changes, this job will need
-      # the MSVC Spectre-mitigated libraries installed.
-      - name: Install
-        run: npm ci
+      - uses: Swatinem/rust-cache@v2
 
-      # Indispensable, et pas seulement une vérification : c'est cette étape qui
-      # produit `out/`. `out/` est gitignoré, electron-builder n'exécute aucun
-      # script de build, et son `files: out/**` ne matcherait rien — le
-      # packaging échouerait sur « Application entry file app.asar does not
-      # exist ». (`npm run build` enchaîne typecheck puis electron-vite build,
-      # d'où l'absence d'étape typecheck séparée.)
-      - name: Build
-        run: npm run build
+      # NSIS fabrique l'installeur (installer/myterm.nsi). Le runner peut l'avoir déjà ; sinon chocolatey.
+      - name: NSIS
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+            choco install nsis -y --no-progress
+          }
 
       - name: Test
-        run: npm test
+        run: cargo test --release
 
       # Le garde-fou central de ce workflow.
       #
-      # electron-builder ne traite pas une release déjà existante comme une
+      # le packaging ne traite pas une release déjà existante comme une
       # erreur : si elle a moins de 2 h il *réutilise* la release et écrase ses
       # assets, au-delà il n'écrit rien et se contente d'un warning. Publier à
       # chaque push sans garde-fou donnerait donc, selon l'heure, soit un
       # écrasement silencieux de l'installeur déjà distribué, soit un succès en
-      # trompe-l'œil. Et côté client, electron-updater compare des semver :
+      # trompe-l'œil. Et côté client, l'updater compare des semver :
       # republier la même version ne déclenche aucune mise à jour.
       #
       # Conclusion : on ne publie que si `v<version>` n'a pas encore de release
       # *publiée*. Autrement dit, un push sur main publie quand — et seulement
-      # quand — le `version` du package.json a été incrémenté. Le job reste
+      # quand — le `version` du Cargo.toml a été incrémenté. Le job reste
       # idempotent : un re-run ne peut rien casser.
       - name: Gate
         id: gate
@@ -112,9 +106,9 @@ jobs:
           # coup toute comparaison d'ordre entre préversions, dont les règles
           # (identifiants numériques contre alphanumériques) sont un nid à bugs.
           version="$(node -e '
-            const v = require("./package.json").version
+            const v = (require("fs").readFileSync("Cargo.toml", "utf8").match(/^version\s*=\s*"([^"]*)"/m) || [])[1]
             if (typeof v !== "string" || !/^\d+\.\d+\.\d+$/.test(v)) {
-              process.stderr.write("::error::version invalide dans package.json : " + JSON.stringify(v) + " — attendu X.Y.Z, sans préversion ni métadonnée de build.\n")
+              process.stderr.write("::error::version invalide dans Cargo.toml : " + JSON.stringify(v) + " — attendu X.Y.Z, sans préversion ni métadonnée de build.\n")
               process.exit(1)
             }
             process.stdout.write(v)
@@ -187,7 +181,7 @@ jobs:
             case "$decision" in
               published)
                 publish=false
-                summary="La release \`$tag\` est déjà publiée : rien à faire. Incrémentez \`version\` dans package.json pour publier une nouvelle version."
+                summary="La release \`$tag\` est déjà publiée : rien à faire. Incrémentez \`version\` dans Cargo.toml pour publier une nouvelle version."
                 ;;
               regression:*)
                 echo "::error::La version $version n'est pas supérieure à ${decision#regression:}, déjà publiée. Publier la marquerait « latest » et figerait les mises à jour de tout le parc."
@@ -209,7 +203,7 @@ jobs:
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "$summary" >> "$GITHUB_STEP_SUMMARY"
 
-      # electron-builder téléverse ses artefacts en parallèle, et chaque chemin
+      # le packaging téléverse ses artefacts en parallèle, et chaque chemin
       # de téléversement appelle `getOrCreateRelease` de son côté, sans verrou.
       # Deux d'entre eux peuvent donc créer *deux* brouillons portant le même
       # tag, et les assets se répartissent entre les deux.
@@ -220,12 +214,13 @@ jobs:
       # promotion a regardé le mauvais, n'y a pas trouvé latest.yml, et a refusé
       # de publier — elle a bien fait, mais la release était à refaire.
       #
-      # On crée donc le brouillon *avant* le packaging : electron-builder le
+      # On crée donc le brouillon *avant* le packaging : le packaging le
       # retrouve par son tag et s'y attache, et plus aucun de ses uploads n'a de
       # release à créer. Les brouillons existants sont supprimés d'abord plutôt
       # que réutilisés — un brouillon est invisible pour les clients, et tout ce
       # qu'il contient est réécrit par le run en cours de toute façon.
       - name: Prepare draft release
+        id: draft
         if: ${{ steps.gate.outputs.publish == 'true' }}
         shell: bash
         env:
@@ -260,24 +255,39 @@ jobs:
             -f tag_name="$TAG" \
             -f name="$TAG" \
             -F draft=true \
-            -f target_commitish="$GITHUB_SHA" > /dev/null
+            -f target_commitish="$GITHUB_SHA" --jq .id > "$RUNNER_TEMP/draft-id"
+          echo "id=$(cat "$RUNNER_TEMP/draft-id")" >> "$GITHUB_OUTPUT"
           echo "Brouillon \`$TAG\` créé avant le packaging." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Package and upload
-        # `--publish always` crée le brouillon `v<version>` (releaseType: draft,
-        # cf. electron-builder.yml) — ou réutilise celui d'un run précédent, en
-        # écrasant les assets homonymes — et y téléverse l'installeur NSIS *et*
-        # latest.yml. Ce dernier est le fichier qu'interroge l'app : une release
-        # sans lui est installable à la main et invisible pour l'updater.
-        run: npx electron-builder --win --publish ${{ steps.gate.outputs.publish == 'true' && 'always' || 'never' }}
+      # installer/build.ps1 compile, empaquette (NSIS) et écrit dist/latest.yml. Ce dernier est le fichier
+      # qu'interrogent les apps installées, la 0.5.0 Electron comme la version Rust : une release sans lui
+      # est installable à la main et invisible pour l'updater.
+      - name: Package
+        shell: pwsh
+        run: ./installer/build.ps1
+
+      # Téléversement dans le brouillon créé plus haut, par son id : un brouillon n'est pas joignable par
+      # son tag. `--clobber` n'existe pas ici : le brouillon est neuf (les résiduels sont supprimés).
+      - name: Upload to the draft
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.id }}
+        run: |
+          set -euo pipefail
+          for file in dist/MyTerm-*-setup.exe dist/latest.yml; do
+            name="$(basename "$file")"
+            echo "Téléversement de $name"
+            gh api -X POST "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$name" \
+              -H "Content-Type: application/octet-stream" --input "$file" > /dev/null
+          done
 
       # Le brouillon ne devient visible qu'ici, et seulement s'il porte
       # réellement les deux fichiers.
       #
       # La vérification n'est pas décorative : les chemins de téléversement
-      # d'electron-builder sortent en code 0 quand ils renoncent (« GitHub
+      # d'le packaging sortent en code 0 quand ils renoncent (« GitHub
       # release not created », « skipped publishing »). Si quelqu'un publie le
       # brouillon à la main pendant le build, son type ne correspond plus à
       # `releaseType: draft`, les uploads sont sautés en silence — et sans ce
@@ -286,7 +296,7 @@ jobs:
       #
       # Le PATCH pose draft, make_latest et target_commitish d'un seul coup :
       # GitHub n'honore target_commitish que tant que la release est un
-      # brouillon, et electron-builder ne le renseigne jamais — sans lui le tag
+      # brouillon, et le packaging ne le renseigne jamais — sans lui le tag
       # atterrirait sur la tête de la branche par défaut, pas sur le commit
       # effectivement construit. Passer par l'API évite au passage de dépendre
       # de la version de gh du runner (`--latest` sur `release edit` est récent).
@@ -388,5 +398,5 @@ jobs:
         with:
           name: myterm-windows
           path: |
-            release/*.exe
-            release/latest.yml
+            dist/*.exe
+            dist/latest.yml

@@ -1,0 +1,15 @@
+[package]
+name = "myterm-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone: the spike is a throwaway measurement (P01), not part of the product crate.
+[workspace]
+
+[dependencies]
+myterm = { path = ".." }
+iced = { version = "0.14", features = ["canvas", "lazy", "advanced", "tokio"] }
+
+[profile.release]
+opt-level = 3

@@ -3,25 +3,18 @@ name: CI
 on:
   pull_request:
   push:
-    # main déclenche Release, qui fait déjà build + tests. Inutile de payer
-    # deux fois le même job.
     branches-ignore:
       - main
 
 permissions:
   contents: read
 
-# Une branche poussée qui a déjà une PR ouverte déclenche `push` *et*
-# `pull_request`. On regroupe les deux sur le SHA testé plutôt que sur la ref :
-# les deux runs portent sur le même commit, en faire tourner un seul suffit.
 concurrency:
   group: ci-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
   check:
-    # Même OS que la release : node-pty et les chemins Windows sont ce qui casse
-    # ici, les tester sur Linux ne prouverait rien.
     runs-on: windows-latest
 
     steps:
@@ -29,33 +22,32 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+      - name: Toolchain
+        shell: bash
+        run: rustup show
 
-      - name: Install
-        run: npm ci
+      - uses: Swatinem/rust-cache@v2
 
-      # Produit `out/`, que le packaging plus bas exige — et enchaîne le
-      # typecheck au passage (cf. le script `build`).
-      - name: Build
-        run: npm run build
+      - name: NSIS
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+            choco install nsis -y --no-progress
+          }
 
       - name: Test
-        run: npm test
+        run: cargo test --release
 
-      # Empêche le cas « tout est vert, et l'installeur ne se construit pas ».
-      # electron-vite + electron-builder échouent sur des choses qu'aucun test
-      # ne voit (asarUnpack, extraResources, script NSIS).
+      # Le paquet complet, pour que le garde-fou « l'installeur se construit » tourne avant la fusion.
       - name: Package installer
-        run: npx electron-builder --win --publish never
+        shell: pwsh
+        run: ./installer/build.ps1
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: myterm-windows-${{ github.sha }}
           path: |
-            release/*.exe
-            release/latest.yml
+            dist/*.exe
+            dist/latest.yml
           retention-days: 7
