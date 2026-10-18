@@ -1,0 +1,30 @@
+[package]
+name = "myterm"
+version = "0.6.0"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+embed-resource = "3"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+# Terminal widget (vendored from iced_term 0.8.0, MIT, see src/term/LICENSE-iced_term)
+alacritty_terminal = "0.25.1"
+iced = { version = "0.14", features = ["canvas", "lazy", "advanced", "tokio"] }
+iced_core = "0.14"
+iced_graphics = { version = "0.14", default-features = false }
+open = "5.3"
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+rfd = "0.17.2"
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip", "json"] }
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Time", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_Graphics_Gdi", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_System_SystemInformation"] }
+
+[dev-dependencies]
+regex = "1"

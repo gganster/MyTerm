@@ -1,0 +1,402 @@
+name: Release
+
+on:
+  push:
+    # Un push sur la branche par défaut publie, à condition que la version du
+    # Cargo.toml n'ait pas déjà une release publiée (voir l'étape « Gate »).
+    #
+    # Pas de déclencheur sur tag : le seul juge de la version est le
+    # Cargo.toml. Un tag `v0.2.0` poussé sur un arbre où Cargo.toml dit
+    # 0.1.0 ferait tourner un build complet pour republier 0.1.0 — c'est-à-dire
+    # rien. Pour rejouer une publication, utiliser workflow_dispatch.
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publier la release (sinon: build à blanc, artefacts en pièces jointes du run)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# Deux pushes rapprochés ne doivent pas courir l'un contre l'autre pour créer la
+# même release. On ne cancel pas en cours : un build annulé après un upload
+# partiel laisserait un brouillon incomplet.
+#
+# Limite connue : GitHub ne garde qu'un seul run *en attente* par groupe. Trois
+# bumps de version en moins d'un build (~5 min) verraient celui du milieu
+# annulé, et comme le garde-fou est indexé sur la version, rien ne le rejouerait
+# tout seul. Un `workflow_dispatch` avec `publish: true` ne le rattrape que tant
+# qu'aucune version supérieure n'est publiée — après quoi le contrôle de
+# non-régression le refuse, à raison : cette version-là est simplement
+# abandonnée, ce qui est sans conséquence.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Windows-only by design: the target is Windows 11 and the installer is NSIS.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Rien ici ne pousse avec git, et le token du job a les droits
+          # d'écriture : le laisser dans .git/config pour toute la durée du job,
+          # `cargo` et `build.rs` compris, ne sert à rien.
+          persist-credentials: false
+
+      # La chaîne de build est celle de `rust-toolchain.toml` : rustup l'installe seul au premier appel.
+      - name: Toolchain
+        shell: bash
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+
+      # NSIS fabrique l'installeur (installer/myterm.nsi). Le runner peut l'avoir déjà ; sinon chocolatey.
+      - name: NSIS
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+            choco install nsis -y --no-progress
+          }
+
+      - name: Test
+        run: cargo test --release
+
+      # Le garde-fou central de ce workflow.
+      #
+      # le packaging ne traite pas une release déjà existante comme une
+      # erreur : si elle a moins de 2 h il *réutilise* la release et écrase ses
+      # assets, au-delà il n'écrit rien et se contente d'un warning. Publier à
+      # chaque push sans garde-fou donnerait donc, selon l'heure, soit un
+      # écrasement silencieux de l'installeur déjà distribué, soit un succès en
+      # trompe-l'œil. Et côté client, l'updater compare des semver :
+      # republier la même version ne déclenche aucune mise à jour.
+      #
+      # Conclusion : on ne publie que si `v<version>` n'a pas encore de release
+      # *publiée*. Autrement dit, un push sur main publie quand — et seulement
+      # quand — le `version` du Cargo.toml a été incrémenté. Le job reste
+      # idempotent : un re-run ne peut rien casser.
+      - name: Gate
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_PUBLISH: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+
+          # Valider avant de s'en servir : ce champ finit dans un nom de tag et
+          # dans $GITHUB_OUTPUT. Une chaîne absente donnerait une release
+          # `vundefined`, et une chaîne contenant un saut de ligne définirait une
+          # sortie d'étape supplémentaire. Le `$` de JavaScript ne tolère pas de
+          # newline finale, contrairement à celui de grep : la validation est
+          # donc faite ici, sur la chaîne brute.
+          #
+          # `X.Y.Z` strictement : les préversions ne sont pas acceptées. Rien
+          # ici ne définit de canal de préversion — pas de `channel`, pas
+          # d'`allowPrerelease` côté client — et la promotion pose `make_latest`.
+          # Publier un `1.0.0-beta.1` l'enverrait donc à *tout* le parc, ce que
+          # personne n'attend d'une bêta. Les refuser d'entrée supprime du même
+          # coup toute comparaison d'ordre entre préversions, dont les règles
+          # (identifiants numériques contre alphanumériques) sont un nid à bugs.
+          version="$(node -e '
+            const v = (require("fs").readFileSync("Cargo.toml", "utf8").match(/^version\s*=\s*"([^"]*)"/m) || [])[1]
+            if (typeof v !== "string" || !/^\d+\.\d+\.\d+$/.test(v)) {
+              process.stderr.write("::error::version invalide dans Cargo.toml : " + JSON.stringify(v) + " — attendu X.Y.Z, sans préversion ni métadonnée de build.\n")
+              process.exit(1)
+            }
+            process.stdout.write(v)
+          ')"
+          tag="v$version"
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DISPATCH_PUBLISH" != "true" ]; then
+            # Build à blanc : on ne consulte même pas GitHub. Interroger l'API
+            # ici ferait échouer une simple répétition sur une panne d'auth.
+            publish=false
+            summary="Build à blanc demandé : rien ne sera publié."
+          else
+            # On lit l'API plutôt que `gh release view` : une erreur de gh
+            # arrête le job via `set -e` au lieu d'être devinée sur le texte de
+            # son message, et rien de son stderr ne peut se mélanger à la valeur
+            # comparée. `--paginate` parce qu'un dépôt à plus de 30 releases
+            # sortirait le brouillon de la première page.
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[]' \
+              > "$RUNNER_TEMP/releases.jsonl"
+
+            # Le tri se fait en node, pas en jq : node est garanti présent (il
+            # vient de builder l'app) et le tag passe par l'environnement, donc
+            # il n'est jamais concaténé dans un programme.
+            #
+            # La décision inclut un contrôle de non-régression : publier une
+            # version *inférieure* à la plus haute déjà publiée — un revert
+            # malheureux du champ `version`, un correctif poussé depuis une
+            # branche de maintenance — la ferait marquer « latest » et
+            # /releases/latest pointerait sur l'ancienne. Personne ne
+            # rétrograde (`allowDowngrade` est faux), mais tout le parc
+            # cesserait silencieusement de voir des mises à jour. On refuse ici,
+            # et la promotion recalcule `make_latest` de son côté pour couvrir
+            # ce qui aurait été publié pendant le build.
+            decision="$(JSONL="$RUNNER_TEMP/releases.jsonl" TAG="$tag" VERSION="$version" node -e '
+              const fs = require("fs")
+              const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/
+              const rels = fs.readFileSync(process.env.JSONL, "utf8")
+                .split("\n").filter(Boolean).map((l) => JSON.parse(l))
+
+              // Trois entiers, rien de plus : les préversions ont été refusées
+              // à la validation, et les tags qui ne sont pas des X.Y.Z nus sont
+              // ignorés plus bas.
+              const cmp = (a, b) => {
+                for (let i = 1; i <= 3; i++) {
+                  const d = Number(a[i]) - Number(b[i])
+                  if (d !== 0) return d < 0 ? -1 : 1
+                }
+                return 0
+              }
+
+              const mine = SEMVER.exec(process.env.VERSION)
+              const existing = rels.find((r) => r.tag_name === process.env.TAG)
+              if (existing && !existing.draft) {
+                process.stdout.write("published")
+              } else {
+                let highest = null
+                for (const r of rels) {
+                  if (r.draft) continue
+                  const m = SEMVER.exec(String(r.tag_name || "").replace(/^v/, ""))
+                  if (m && (highest === null || cmp(m, highest) > 0)) highest = m
+                }
+                if (highest !== null && cmp(mine, highest) <= 0) {
+                  process.stdout.write("regression:" + highest[0])
+                } else {
+                  process.stdout.write(existing ? "draft" : "none")
+                }
+              }
+            ')"
+
+            case "$decision" in
+              published)
+                publish=false
+                summary="La release \`$tag\` est déjà publiée : rien à faire. Incrémentez \`version\` dans Cargo.toml pour publier une nouvelle version."
+                ;;
+              regression:*)
+                echo "::error::La version $version n'est pas supérieure à ${decision#regression:}, déjà publiée. Publier la marquerait « latest » et figerait les mises à jour de tout le parc."
+                exit 1
+                ;;
+              draft)
+                # Résidu d'un run interrompu : à reprendre, pas à contourner.
+                publish=true
+                summary="Reprise du brouillon \`$tag\` laissé par un run précédent."
+                ;;
+              *)
+                publish=true
+                summary="Publication de \`$tag\`."
+                ;;
+            esac
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "$summary" >> "$GITHUB_STEP_SUMMARY"
+
+      # le packaging téléverse ses artefacts en parallèle, et chaque chemin
+      # de téléversement appelle `getOrCreateRelease` de son côté, sans verrou.
+      # Deux d'entre eux peuvent donc créer *deux* brouillons portant le même
+      # tag, et les assets se répartissent entre les deux.
+      #
+      # Ce n'est pas théorique : v0.1.0 a laissé un brouillon orphelin ne
+      # portant que le .blockmap, et sur v0.2.0 l'installeur et latest.yml ont
+      # atterri sur un brouillon pendant que le blockmap créait l'autre. La
+      # promotion a regardé le mauvais, n'y a pas trouvé latest.yml, et a refusé
+      # de publier — elle a bien fait, mais la release était à refaire.
+      #
+      # On crée donc le brouillon *avant* le packaging : le packaging le
+      # retrouve par son tag et s'y attache, et plus aucun de ses uploads n'a de
+      # release à créer. Les brouillons existants sont supprimés d'abord plutôt
+      # que réutilisés — un brouillon est invisible pour les clients, et tout ce
+      # qu'il contient est réécrit par le run en cours de toute façon.
+      - name: Prepare draft release
+        id: draft
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.gate.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[]' \
+            > "$RUNNER_TEMP/releases.jsonl"
+
+          # En node, et le tag par l'environnement : même raison qu'au Gate, le
+          # tag n'est jamais concaténé dans un programme.
+          stale="$(JSONL="$RUNNER_TEMP/releases.jsonl" node -e '
+            const fs = require("fs")
+            const rels = fs.readFileSync(process.env.JSONL, "utf8")
+              .split("\n").filter(Boolean).map((l) => JSON.parse(l))
+            for (const r of rels) {
+              if (r.tag_name === process.env.TAG && r.draft) process.stdout.write(r.id + "\n")
+            }
+          ')"
+
+          for id in $stale; do
+            echo "Suppression du brouillon résiduel $id ($TAG)."
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done
+
+          # Un brouillon ne pose pas de tag git : rien à nettoyer côté refs, et
+          # `target_commitish` ne sera honoré qu'à la promotion — il est repassé
+          # là-bas de toute façon.
+          gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$TAG" \
+            -f name="$TAG" \
+            -F draft=true \
+            -f target_commitish="$GITHUB_SHA" --jq .id > "$RUNNER_TEMP/draft-id"
+          echo "id=$(cat "$RUNNER_TEMP/draft-id")" >> "$GITHUB_OUTPUT"
+          echo "Brouillon \`$TAG\` créé avant le packaging." >> "$GITHUB_STEP_SUMMARY"
+
+      # installer/build.ps1 compile, empaquette (NSIS) et écrit dist/latest.yml. Ce dernier est le fichier
+      # qu'interrogent les apps installées, la 0.5.0 Electron comme la version Rust : une release sans lui
+      # est installable à la main et invisible pour l'updater.
+      - name: Package
+        shell: pwsh
+        run: ./installer/build.ps1
+
+      # Téléversement dans le brouillon créé plus haut, par son id : un brouillon n'est pas joignable par
+      # son tag. `--clobber` n'existe pas ici : le brouillon est neuf (les résiduels sont supprimés).
+      - name: Upload to the draft
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.id }}
+        run: |
+          set -euo pipefail
+          for file in dist/MyTerm-*-setup.exe dist/latest.yml; do
+            name="$(basename "$file")"
+            echo "Téléversement de $name"
+            gh api -X POST "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$name" \
+              -H "Content-Type: application/octet-stream" --input "$file" > /dev/null
+          done
+
+      # Le brouillon ne devient visible qu'ici, et seulement s'il porte
+      # réellement les deux fichiers.
+      #
+      # La vérification n'est pas décorative : les chemins de téléversement
+      # d'le packaging sortent en code 0 quand ils renoncent (« GitHub
+      # release not created », « skipped publishing »). Si quelqu'un publie le
+      # brouillon à la main pendant le build, son type ne correspond plus à
+      # `releaseType: draft`, les uploads sont sautés en silence — et sans ce
+      # contrôle on marquerait « latest » une release sans latest.yml, ce qui
+      # casserait la mise à jour de tout le parc jusqu'à ce qu'un humain le voie.
+      #
+      # Le PATCH pose draft, make_latest et target_commitish d'un seul coup :
+      # GitHub n'honore target_commitish que tant que la release est un
+      # brouillon, et le packaging ne le renseigne jamais — sans lui le tag
+      # atterrirait sur la tête de la branche par défaut, pas sur le commit
+      # effectivement construit. Passer par l'API évite au passage de dépendre
+      # de la version de gh du runner (`--latest` sur `release edit` est récent).
+      - name: Promote release
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.gate.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --jq '.[]' \
+            > "$RUNNER_TEMP/releases.jsonl"
+          # Renvoie « <id> <make_latest> ». `make_latest` est recalculé ici et
+          # non repris du Gate : cinq minutes de build séparent les deux, et si
+          # quelqu'un a publié une version supérieure entre-temps, marquer
+          # celle-ci « latest » ferait régresser /releases/latest et figerait
+          # les mises à jour du parc. Dans ce cas on publie quand même la
+          # release — elle est légitime — simplement sans la marquer « latest ».
+          # Une affectation simple, et non `read <<< "$(...)"` : dans un
+          # here-string, le statut de la substitution n'est pas celui de la
+          # commande, donc `set -e` ne verrait pas un `exit 1` du programme
+          # ci-dessous — le contrôle de doublon plus bas serait décoratif.
+          selection="$(JSONL="$RUNNER_TEMP/releases.jsonl" node -e '
+            const fs = require("fs")
+            const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/
+            const rels = fs.readFileSync(process.env.JSONL, "utf8")
+              .split("\n").filter(Boolean).map((l) => JSON.parse(l))
+            const cmp = (a, b) => {
+              for (let i = 1; i <= 3; i++) {
+                const d = Number(a[i]) - Number(b[i])
+                if (d !== 0) return d < 0 ? -1 : 1
+              }
+              return 0
+            }
+            // Toutes les releases du tag, pas la première : deux brouillons
+            // homonymes ont déjà existé (cf. « Prepare draft release »), et
+            // `find` en choisissait une au hasard de l’ordre de l’API — donc
+            // parfois celle qui ne portait pas latest.yml. Si le cas se
+            // reproduit malgré la pré-création, on le dit au lieu de tirer à
+            // pile ou face sur la release qu’on rend publique.
+            const matches = rels.filter((r) => r.tag_name === process.env.TAG)
+            if (matches.length > 1) {
+              process.stderr.write("::error::" + matches.length + " releases portent le tag " +
+                process.env.TAG + " (" + matches.map((r) => r.id).join(", ") +
+                "). Publication refusée : impossible de choisir laquelle est la bonne.\n")
+              process.exit(1)
+            }
+            const rel = matches[0]
+            const mine = SEMVER.exec(String(process.env.TAG).replace(/^v/, ""))
+            let highest = null
+            for (const r of rels) {
+              if (r.draft || r.id === (rel && rel.id)) continue
+              const m = SEMVER.exec(String(r.tag_name || "").replace(/^v/, ""))
+              if (m && (highest === null || cmp(m, highest) > 0)) highest = m
+            }
+            const isHighest = highest === null || cmp(mine, highest) > 0
+            // Un tiret, et pas une chaîne vide : `read` mange les blancs de
+            // tête, donc un id vide décalerait le second champ dans le premier.
+            process.stdout.write((rel ? String(rel.id) : "-") + " " + (isHighest ? "true" : "false"))
+          ')"
+          read -r id make_latest <<<"$selection"
+
+          if [ "$id" = "-" ]; then
+            echo "::error::Aucune release $TAG après le packaging : rien n'a été téléversé."
+            exit 1
+          fi
+
+          # `state == "uploaded"` et pas seulement le nom : un téléversement tué
+          # en cours laisse un asset qui porte son nom et apparaît dans la
+          # liste, mais reste en état `starter` et n'est pas téléchargeable.
+          # C'est précisément le cas que ce contrôle est censé attraper.
+          names="$(gh api "repos/$GITHUB_REPOSITORY/releases/$id/assets?per_page=100" \
+            --paginate --jq '.[] | select(.state == "uploaded" and .size > 0) | .name')"
+          if ! printf '%s\n' "$names" | grep -qxF 'latest.yml'; then
+            echo "::error::latest.yml absent de $TAG : l'updater ne verrait pas cette version. Publication refusée."
+            exit 1
+          fi
+          if ! printf '%s\n' "$names" | grep -qiE '\.exe$'; then
+            echo "::error::Aucun installeur .exe dans $TAG. Publication refusée."
+            exit 1
+          fi
+
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" \
+            -F draft=false \
+            -f "make_latest=$make_latest" \
+            -f target_commitish="$GITHUB_SHA" > /dev/null
+
+          if [ "$make_latest" = "true" ]; then
+            echo "Release \`$TAG\` publiée sur $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Release \`$TAG\` publiée sur $GITHUB_SHA, **sans** la marquer « latest » : une version supérieure a été publiée pendant le build." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload artifacts
+        if: ${{ steps.gate.outputs.publish != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: myterm-windows
+          path: |
+            dist/*.exe
+            dist/latest.yml

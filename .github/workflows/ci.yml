@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        shell: bash
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: NSIS
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+            choco install nsis -y --no-progress
+          }
+
+      - name: Test
+        run: cargo test --release
+
+      # Le paquet complet, pour que le garde-fou « l'installeur se construit » tourne avant la fusion.
+      - name: Package installer
+        shell: pwsh
+        run: ./installer/build.ps1
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: myterm-windows-${{ github.sha }}
+          path: |
+            dist/*.exe
+            dist/latest.yml
+          retention-days: 7
