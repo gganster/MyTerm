@@ -88,4 +88,5 @@ Closes: AC13, AC15, AC16
 Closes: AC14, Success metrics
 
 - [x] Une installation 0.5.0 réelle se met à jour vers la version Rust, et tout ce que liste AC14 est retrouvé
-- [ ] Les quatre mesures refaites en Rust battent la référence de T01, puis deux semaines d'usage quotidien se passent sans retour à Electron
+- [x] Les quatre mesures refaites en Rust battent la référence de T01 (installeur, RAM, ouverture, deuxième fenêtre : voir `baseline.md` §5 et le relevé exact)
+- [ ] Deux semaines d'usage quotidien se passent sans retour à Electron (à compter du 2026-10-18 : au plus tôt le 2026-11-01)
