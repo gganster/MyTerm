@@ -15,6 +15,10 @@ fn main() -> iced::Result {
         std::env::set_var("ICED_BACKEND", "tiny-skia");
     }
 
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        myterm::updater::remove_electron_updater_cache(std::path::Path::new(&local));
+    }
+
     // Registered before the window is placed: the cascade counts the *other* live instances.
     let dir = user_data_dir();
     let others = myterm::instances::init(dir.join("instances")).other_count();

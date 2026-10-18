@@ -76,3 +76,21 @@ deuxième fenêtre), non faite : cela lance le `MyTerm.exe` installé.
 
 Optimisation faite pendant la mesure : la première mesure de police charge toutes les polices installées
 (~300 ms) et précédait le lancement des shells ; elle passe après (`Terminal::measure_font`).
+
+### Relevé exact, 0.5.0 contre Rust (2026-10-18)
+
+Horodatage exact (`StartTime` de chaque `pwsh` moins l'instant du lancement, aucun sondage), mêmes projets
+et même machine, `starts2.ps1`. Le `MyTerm.exe` de la 0.5.0 a été restauré pour l'occasion (sauvegarde
+`backup-0.5.0-install`), lancé avec un `%APPDATA%` isolé, et arrêté par PID.
+
+| | 0.5.0 Electron | Rust |
+|---|---|---|
+| première fenêtre, dernier des 6 shells | 5,78 s (premier lancement à froid) | 0,77 s |
+| deuxième fenêtre, dernier des 6 shells | 1,54 s / 1,61 s (un 3e essai : 0 shell en 9 s) | 0,70 s / 0,57 s / 0,59 s |
+
+Les quatre mesures sont donc meilleures en Rust, la deuxième fenêtre comprise (0,57 à 0,70 s contre 1,54 à
+1,61 s ; cible ≤ 1,2 s tenue). Le protocole à sondage de la section 1 sous-estimait l'écart : sa latence
+(~0,3 à 1 s par passe) pèse davantage sur les temps courts.
+Remarque : le `MyTerm.exe` d'Electron ne tient pas compte de la variable `APPDATA` pour son dossier de
+données : ses lancements « isolés » ont écrit dans le vrai `%APPDATA%\MyTerm` (seul effet constaté : le
+`lastOpenedAt` du projet de démonstration `measure6`).

@@ -90,3 +90,10 @@ Reste pour T09 :
 
 ### T04 - codex vérifié (2026-10-18)
 `codex --no-daemon` dans un pane : l'interface (gras, vidéo inverse de la sélection, lien souligné, mise en page) s'affiche correctement en thème sombre et clair. `codex` seul répond « start the Windows daemon from a non-elevated terminal » : la session qui lance MyTerm est élevée, ce n'est pas un défaut du terminal. Comparaison avec la 0.5.0 non faite (elle demanderait de la lancer).
+
+### T09 - mise à jour réelle par l'updater de la 0.5.0 (2026-10-18)
+Accord de l'utilisateur pour lancer la 0.5.0. Restauration depuis la sauvegarde (script corrigé : un `reg delete` sur une clé absente arrêtait la restauration), puis le `MyTerm.exe` 0.5.0, lancé sur `measure6`, a trouvé la release et affiché « Version 0.6.0 disponible. Redémarrer fermera les panes… » (sha512 vérifié par `electron-updater`).
+Défaut trouvé : l'updater de la 0.5.0 lance l'installeur avec `--updated --force-run` **sans `/S`** (`quitAndInstall(false, true)`), la fenêtre de l'installeur s'ouvrait sur la page du dossier et attendait un clic. Corrigé (pages dossier et fin sautées, fermeture automatique, vérifié en 4,6 s sur la variante SANDBOX), publié en `v0.6.1` par le workflow.
+Deuxième essai, réel : clic sur « Redémarrer maintenant » dans la 0.5.0 → installation sans interaction → `MyTerm 0.6.1` seule entrée dans « Applications installées », exécutable Rust de 16 Mo, plus de `app.asar`, application relancée depuis le dossier d'installation (`--force-run`), menu contextuel, raccourci (pas de raccourci Bureau), PATH (31 entrées, une MyTerm, `REG_EXPAND_SZ`), `.updaterId` conservés ; `preferences.json` : seul `lastOpenedAt` du projet `measure6` a changé (les lancements d'Electron ignorent `APPDATA`).
+Reste visible : le cache `%LOCALAPPDATA%\myterm-updater` (l'installeur tourne depuis ce dossier et ne peut pas le supprimer) : retiré au démarrage de la version suivante (`updater::remove_electron_updater_cache`, 0.6.2).
+Non vérifié : le bouton épinglé de la barre des tâches. Deux semaines d'usage : à faire.

@@ -87,5 +87,5 @@ Closes: AC13, AC15, AC16
 
 Closes: AC14, Success metrics
 
-- [ ] Une installation 0.5.0 réelle se met à jour vers la version Rust, et tout ce que liste AC14 est retrouvé
+- [x] Une installation 0.5.0 réelle se met à jour vers la version Rust, et tout ce que liste AC14 est retrouvé
 - [ ] Les quatre mesures refaites en Rust battent la référence de T01, puis deux semaines d'usage quotidien se passent sans retour à Electron

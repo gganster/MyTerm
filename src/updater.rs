@@ -195,6 +195,16 @@ pub fn check_once(current: &str, source: &Source, dir: &Path) -> Result<Option<R
     Ok(Some(Ready { version: latest.version, installer: target }))
 }
 
+/// The download cache the Electron updater (0.5.0) leaves in `%LOCALAPPDATA%\myterm-updater`. The 0.5.0
+/// runs the installer from inside it, so the installer cannot delete the folder it is running from: the
+/// first start of the new version does, once nothing runs from there any more. Best effort, silent.
+pub fn remove_electron_updater_cache(local_app_data: &Path) {
+    let dir = local_app_data.join("myterm-updater");
+    if dir.is_dir() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
 pub fn download_dir() -> PathBuf {
     std::env::temp_dir().join("MyTerm-update")
 }
@@ -242,6 +252,19 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+    #[test]
+    fn the_electron_updater_cache_is_removed_and_nothing_else() {
+        let base = tmp("legacy");
+        std::fs::create_dir_all(base.join("myterm-updater").join("pending")).unwrap();
+        std::fs::write(base.join("myterm-updater").join("pending").join("MyTerm-0.6.1-setup.exe"), "x").unwrap();
+        std::fs::create_dir_all(base.join("MyTerm").join("bin")).unwrap();
+        remove_electron_updater_cache(&base);
+        assert!(!base.join("myterm-updater").exists());
+        assert!(base.join("MyTerm").join("bin").exists(), "le shim n'est pas touché");
+        remove_electron_updater_cache(&base); // nothing there: no panic
+        let _ = std::fs::remove_dir_all(base);
+    }
 
     #[test]
     fn latest_yml_is_read_at_top_level_only() {
