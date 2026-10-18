@@ -1,4 +1,6 @@
 //! MyTerm, native. `myterm [folder]` opens a project in its own window and process.
+// Release is a GUI-subsystem binary: no console window next to the app. Debug keeps it for logs.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use myterm::app::App;
 use myterm::prefs_store::{user_data_dir, PrefsStore};
