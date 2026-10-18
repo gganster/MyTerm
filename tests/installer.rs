@@ -317,3 +317,16 @@ fn an_update_does_not_bring_back_a_desktop_shortcut_the_user_never_had() {
     assert!(code[guard..desktop].lines().count() <= 3, "le raccourci doit être dans la garde");
     assert!(code.contains(r#"${If} ${FileExists} "$INSTDIR\MyTerm.exe""#));
 }
+
+#[test]
+fn an_update_run_without_dash_s_goes_through_by_itself() {
+    // The 0.5.0 updater calls quitAndInstall(false, true): `--updated --force-run`, no `/S`. The window
+    // opens and nobody is there to click: no page may wait for an answer.
+    let code = nsi_code();
+    assert!(code.contains("--updated"));
+    assert!(code.contains("MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdated"));
+    assert_eq!(code.matches("MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdated").count(), 2, "dossier et fin");
+    assert!(code.contains("SetAutoClose true"));
+    let skip = &code[code.find("Function SkipIfUpdated").unwrap()..];
+    assert!(skip[..skip.find("FunctionEnd").unwrap()].contains("Abort"));
+}

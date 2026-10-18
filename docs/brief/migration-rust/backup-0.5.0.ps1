@@ -50,8 +50,11 @@ if (-not $Restore) {
 # Restore: the install folder first (the Rust files are overwritten, the extra ones removed), then the keys.
 if (Get-Process | Where-Object { $_.ProcessName -ieq 'MyTerm' }) { throw 'MyTerm tourne : fermez-le avant la restauration.' }
 robocopy (Join-Path $Dir 'install') $install /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+# `reg delete` of a key that is not there is an error for PowerShell, and not one to stop on.
+$ErrorActionPreference = 'Continue'
 foreach ($f in Get-ChildItem $Dir -Filter 'key*.name') { $k = Get-Content $f.FullName; reg delete $k /f 2>$null | Out-Null }
 foreach ($f in Get-ChildItem $Dir -Filter 'key*.absent') { $k = Get-Content $f.FullName; reg delete $k /f 2>$null | Out-Null }
+$ErrorActionPreference = 'Stop'
 foreach ($f in Get-ChildItem $Dir -Filter 'key*.reg') { reg import $f.FullName | Out-Null }
 $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
 $key.SetValue('Path', (Get-Content (Join-Path $Dir 'path.txt') -Raw), [Microsoft.Win32.RegistryValueKind]::Parse([Microsoft.Win32.RegistryValueKind], (Get-Content (Join-Path $Dir 'path.kind'))))

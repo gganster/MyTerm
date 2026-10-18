@@ -71,12 +71,34 @@ VIAddVersionKey "LegalCopyright" "MIT"
 !define MUI_UNICON "icon.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\MyTerm.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Lancer MyTerm"
+; `--updated` is what the 0.5.0 updater passes, and it passes it WITHOUT `/S` (`quitAndInstall(false, true)`
+; is not silent): the installer window opens, and must go through by itself. The folder is the one already
+; installed, there is nothing to ask, and nothing to confirm at the end: `--force-run` relaunches the app.
+Function SkipIfUpdated
+  ${GetParameters} $R0
+  ${GetOptions} $R0 "--updated" $R1
+  ${IfNot} ${Errors}
+    Abort
+  ${EndIf}
+FunctionEnd
+
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdated
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdated
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "French"
+
+Function .onInit
+  ${GetParameters} $R0
+  ${GetOptions} $R0 "--updated" $R1
+  ${IfNot} ${Errors}
+    ; The progress page closes itself once it is done (the finish page is skipped above).
+    SetAutoClose true
+  ${EndIf}
+FunctionEnd
 
 !macro CloseRunning un
   Function ${un}CloseRunning
