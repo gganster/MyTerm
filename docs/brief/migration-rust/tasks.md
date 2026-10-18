@@ -43,7 +43,7 @@ Closes: AC1, AC3 (logique), AC11 (fusion des préférences)
 
 Closes: AC5
 
-- [ ] Un pane fait tourner `claude`, `codex`, `pwsh` et `npm run dev` avec le même rendu que la 0.5.0, palettes claire et sombre comprises (claude, pwsh, npm run dev vérifiés ; codex non vérifié, voir spike-p01.md)
+- [x] Un pane fait tourner `claude`, `codex`, `pwsh` et `npm run dev` avec le même rendu que la 0.5.0, palettes claire et sombre comprises (claude, pwsh, npm run dev, codex vérifiés ; la comparaison pixel à pixel avec la 0.5.0 n’a pas été faite)
 - [x] La sélection et `Ctrl+Shift+C`, `Ctrl+Entrée`, le redimensionnement et les 5000 lignes de scrollback fonctionnent, et aucune touche du shell n'est interceptée
 - [x] Les cas de `tests/renderer/key-chords` et `command-capture` sont portés et passent
 

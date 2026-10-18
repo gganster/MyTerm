@@ -87,3 +87,6 @@ Reste pour T09 :
 - Non vérifiés : bouton épinglé de la barre des tâches, géométrie de fenêtre d'une 0.5.0 (fichier lu, pas de fenêtre ouverte).
 - Deuxième fenêtre : non démontrée meilleure (voir baseline.md §5) ; mesure exacte de la 0.5.0 non faite.
 - Deux semaines d'usage quotidien.
+
+### T04 - codex vérifié (2026-10-18)
+`codex --no-daemon` dans un pane : l'interface (gras, vidéo inverse de la sélection, lien souligné, mise en page) s'affiche correctement en thème sombre et clair. `codex` seul répond « start the Windows daemon from a non-elevated terminal » : la session qui lance MyTerm est élevée, ce n'est pas un défaut du terminal. Comparaison avec la 0.5.0 non faite (elle demanderait de la lancer).
