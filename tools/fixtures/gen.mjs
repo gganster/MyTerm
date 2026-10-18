@@ -27,4 +27,5 @@ execFileSync(
   ],
   { stdio: 'inherit' },
 )
-execFileSync(process.execPath, [outfile, target], { stdio: 'inherit' })
+// From C:\ on purpose: the cwd cases resolve rooted paths against the process's drive, and the Rust test pins the same one.
+execFileSync(process.execPath, [outfile, target], { stdio: 'inherit', cwd: 'C:\\' })

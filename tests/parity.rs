@@ -198,6 +198,10 @@ fn preferences_validation_matches_electron() {
 
 #[test]
 fn resolve_cwd_matches_electron() {
+    // `path.win32.resolve` of a drive-relative or rooted path depends on the process's own drive: the
+    // fixtures were generated from `C:\` (see gen.mjs), so the test must run from there too, whatever
+    // drive the checkout lives on (a CI workspace is on D:).
+    std::env::set_current_dir("C:\\").expect("C:\\");
     for case in fixture("cwdCases") {
         let (root, cwd) = (s(&case["root"]), s(&case["cwd"]));
         match resolve_cwd(root, cwd) {
